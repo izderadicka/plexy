@@ -1,7 +1,10 @@
 use error::Error;
-use std::{net::SocketAddr, str::FromStr};
+use std::{io, net::SocketAddr, str::FromStr};
+use tokio::net::{TcpListener, TcpStream};
+use tracing::debug;
 
 pub mod config;
+pub mod controller;
 pub mod error;
 
 #[derive(Debug, Clone)]
@@ -30,6 +33,27 @@ impl FromStr for Tunnel {
             ))
         };
         Ok(Tunnel { local, remote })
+    }
+}
+
+pub async fn process_socket(mut socket: TcpStream, fwd: SocketAddr) -> io::Result<(u64, u64)> {
+    let remote_client = socket
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    debug!(client = remote_client, "Client connected");
+    let mut stream = TcpStream::connect(fwd).await?;
+    let res = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+    debug!(client = remote_client, "Client disconnected");
+    res
+}
+
+pub async fn run_tunnel(tunnel: Tunnel) -> io::Result<()> {
+    let listener = TcpListener::bind(tunnel.local).await?;
+
+    loop {
+        let (socket, _) = listener.accept().await?;
+        tokio::spawn(process_socket(socket, tunnel.remote));
     }
 }
 

@@ -12,7 +12,7 @@ pub struct Args {
         help = "Socket address to listen for control commands",
         default_value = "127.0.0.1:9999"
     )]
-    pub control_socket: Option<SocketAddr>,
+    pub control_socket: SocketAddr,
 
     #[arg(
         num_args = 0..1024,
