@@ -1,0 +1,16 @@
+[package]
+name = "plexy"
+version = "0.1.0"
+author = "Ivan"
+about = "Simple dynamic TCP proxy"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.0.29", features = ["derive"] }
+derive = "1.0.0"
+features = "0.10.0"
+thiserror = "1.0.37"
+tokio = { version = "1.23.0", features = ["full"] }
+tokio-util = { version = "0.7.4", features = ["codec"] }
