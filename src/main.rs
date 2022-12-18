@@ -1,7 +1,7 @@
 use clap::Parser;
-use plexy::{config::Args, controller::run_controller, run_tunnel};
+use plexy::{config::Args, controller::run_controller, start_tunnel, State};
 use std::io;
-use tracing::info;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -9,10 +9,13 @@ async fn main() -> io::Result<()> {
     let args = Args::parse();
     info!(tunnels = args.tunnels.len(), "Started plexy");
     info!("Control interface listening on {}", args.control_socket);
+    let state = State::new();
     tokio::spawn(run_controller(args.control_socket));
     // launch tunnels
     for tunnel in args.tunnels {
-        tokio::spawn(run_tunnel(tunnel));
+        if let Err(e) = start_tunnel(tunnel.clone(), state.clone()).await {
+            error!("Cannot start tunnel {:?}: {}", tunnel, e);
+        };
     }
     std::future::pending::<()>().await;
     Ok(())

@@ -1,7 +1,10 @@
-use error::Error;
-use std::{io, net::SocketAddr, str::FromStr};
-use tokio::net::{TcpListener, TcpStream};
-use tracing::debug;
+use error::{Error, Result};
+use std::{net::SocketAddr, str::FromStr, sync::Arc};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+};
+use tracing::{debug, error};
 
 pub mod config;
 pub mod controller;
@@ -13,10 +16,16 @@ pub struct Tunnel {
     pub remote: SocketAddr,
 }
 
+impl std::fmt::Display for Tunnel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}={}", self.local, self.remote)
+    }
+}
+
 impl FromStr for Tunnel {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         let (local_part, remote_part) = s
             .split_once("=")
             .ok_or_else(|| Error::TunnelParseError(format!("Missing = in tunnel definition")))?;
@@ -36,24 +45,123 @@ impl FromStr for Tunnel {
     }
 }
 
-pub async fn process_socket(mut socket: TcpStream, fwd: SocketAddr) -> io::Result<(u64, u64)> {
+#[derive(Debug)]
+struct TunnelInfo {
+    streams_open: usize,
+    bytes_sent: u64,
+    bytes_received: u64,
+    total_connections: u64,
+    close_channel: oneshot::Sender<()>,
+}
+
+impl TunnelInfo {
+    fn new(close_channel: oneshot::Sender<()>) -> Self {
+        TunnelInfo {
+            streams_open: 0,
+            bytes_sent: 0,
+            bytes_received: 0,
+            total_connections: 0,
+            close_channel,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct State {
+    tunnels: Arc<dashmap::DashMap<SocketAddr, TunnelInfo, fxhash::FxBuildHasher>>,
+}
+
+impl State {
+    pub fn new() -> Self {
+        State {
+            tunnels: Arc::new(dashmap::DashMap::with_hasher(
+                fxhash::FxBuildHasher::default(),
+            )),
+        }
+    }
+
+    pub(crate) fn add_tunnel(
+        &self,
+        tunnel: Tunnel,
+        close_channel: oneshot::Sender<()>,
+    ) -> Result<()> {
+        if self.tunnels.contains_key(&tunnel.local) {
+            return Err(Error::TunnelExists);
+        }
+        let info = TunnelInfo::new(close_channel);
+        self.tunnels.insert(tunnel.local, info);
+        Ok(())
+    }
+
+    pub(crate) fn remove_tunnel(&self, local: &SocketAddr) {
+        self.tunnels.remove(local);
+    }
+}
+
+async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
     let remote_client = socket
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
     debug!(client = remote_client, "Client connected");
-    let mut stream = TcpStream::connect(fwd).await?;
-    let res = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+    match TcpStream::connect(tunnel.remote).await {
+        Ok(mut stream) => {
+            let res = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+        }
+        Err(e) => error!("Error while connecting to remote {}: {}", tunnel.remote, e),
+    }
+
     debug!(client = remote_client, "Client disconnected");
-    res
 }
 
-pub async fn run_tunnel(tunnel: Tunnel) -> io::Result<()> {
-    let listener = TcpListener::bind(tunnel.local).await?;
+pub(crate) struct TunnelHandler {
+    state: State,
+    tunnel: Tunnel,
+    listener: TcpListener,
+    close_channel: oneshot::Receiver<()>,
+}
 
+pub async fn start_tunnel(tunnel: Tunnel, state: State) -> Result<()> {
+    let handler = create_tunnel(tunnel, state).await?;
+    tokio::spawn(run_tunnel(handler));
+    Ok(())
+}
+
+async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
+    let listener = TcpListener::bind(tunnel.local).await?;
+    let (sender, receiver) = oneshot::channel();
+    state.add_tunnel(tunnel.clone(), sender)?;
+    Ok(TunnelHandler {
+        state,
+        tunnel,
+        listener,
+        close_channel: receiver,
+    })
+}
+
+async fn run_tunnel(mut handler: TunnelHandler) {
+    debug!("Started tunnel {:?}", handler.tunnel);
     loop {
-        let (socket, _) = listener.accept().await?;
-        tokio::spawn(process_socket(socket, tunnel.remote));
+        tokio::select! {
+        socket = handler.listener.accept() => {
+            match socket {
+            Ok((socket, _remote)) => {
+                tokio::spawn(process_socket(
+                    socket,
+                    handler.tunnel.clone(),
+                    handler.state.clone(),
+                ));
+            }
+            Err(e) => error!("Cannot accept connection: {}", e),
+        }
+
+        }
+
+         _ = &mut handler.close_channel => {
+            handler.state.remove_tunnel(&handler.tunnel.local);
+            debug!("Finished tunnel {:?}", handler.tunnel);
+         }
+        }
     }
 }
 
