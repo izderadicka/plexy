@@ -8,6 +8,8 @@ pub enum Error {
     IOError(#[from] std::io::Error),
     #[error("Tunnel already exists")]
     TunnelExists,
+    #[error("Tunnel doesn't exist")]
+    TunnelDoesNotExist,
     #[error("Invalid control protocol line: {0}")]
     ControlProtocolLineError(#[from] tokio_util::codec::LinesCodecError),
     #[error("Control protocol error: {0}")]

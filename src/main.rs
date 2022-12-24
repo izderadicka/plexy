@@ -10,7 +10,7 @@ async fn main() -> io::Result<()> {
     info!(tunnels = args.tunnels.len(), "Started plexy");
     info!("Control interface listening on {}", args.control_socket);
     let state = State::new();
-    tokio::spawn(run_controller(args.control_socket));
+    tokio::spawn(run_controller(args.control_socket, state.clone()));
     // launch tunnels
     for tunnel in args.tunnels {
         if let Err(e) = start_tunnel(tunnel.clone(), state.clone()).await {
