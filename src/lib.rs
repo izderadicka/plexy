@@ -9,6 +9,9 @@ use tracing::{debug, error};
 
 pub use state::State;
 
+use crate::aio::copy_bidirectional;
+
+mod aio;
 pub mod config;
 pub mod controller;
 pub mod error;
@@ -58,7 +61,7 @@ async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
     state.client_connected(&tunnel.local, remote_client.as_ref());
     match TcpStream::connect(tunnel.remote).await {
         Ok(mut stream) => {
-            match tokio::io::copy_bidirectional(&mut socket, &mut stream).await {
+            match copy_bidirectional(&mut socket, &mut stream).await {
                 Ok((sent, received)) => {
                     state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
                 }
