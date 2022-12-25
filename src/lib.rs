@@ -1,5 +1,5 @@
 use error::{Error, Result};
-use std::{net::SocketAddr, str::FromStr, sync::Arc};
+use std::{net::SocketAddr, str::FromStr};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot,
@@ -52,17 +52,23 @@ impl FromStr for Tunnel {
 async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
     let remote_client = socket
         .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    debug!(client = remote_client, "Client connected");
+        .map_err(|e| error!("Cannot get client address: {}", e))
+        .ok();
+    debug!(client = ?remote_client, "Client connected");
+    state.client_connected(&tunnel.local, remote_client.as_ref());
     match TcpStream::connect(tunnel.remote).await {
         Ok(mut stream) => {
-            let res = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+            match tokio::io::copy_bidirectional(&mut socket, &mut stream).await {
+                Ok((sent, received)) => {
+                    state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
+                }
+                Err(e) => error!("Error copying between streams: {}", e),
+            };
         }
         Err(e) => error!("Error while connecting to remote {}: {}", tunnel.remote, e),
     }
-
-    debug!(client = remote_client, "Client disconnected");
+    state.client_disconnected(&tunnel.local, remote_client.as_ref());
+    debug!(client = ?remote_client, "Client disconnected");
 }
 
 pub(crate) struct TunnelHandler {

@@ -35,7 +35,7 @@ pub trait Command: FromStr {
 pub enum CommandRequest {
     Open(Tunnel),
     Close(SocketAddr),
-    Status,
+    Status(bool),
     Help,
     Exit,
     Invalid(Error),
@@ -56,7 +56,19 @@ impl FromStr for CommandRequest {
                 .ok_or_else(|| Error::ControlProtocolError("Missing argument".into()))
         };
         match cmd.as_str() {
-            "STATUS" => Ok(CommandRequest::Status),
+            "STATUS" => {
+                let scale = args().map(|s| s.to_ascii_uppercase()).unwrap_or_default();
+                let is_full = match scale.as_str() {
+                    "LONG" | "FULL" => true,
+                    "SHORT" | "" => false,
+                    _ => {
+                        return Err(Error::ControlProtocolError(
+                            "Invalid argument to STATUS".into(),
+                        ))
+                    }
+                };
+                Ok(CommandRequest::Status(is_full))
+            }
             "OPEN" => {
                 let tunnel: Tunnel = args()?.parse()?;
                 Ok(CommandRequest::Open(tunnel))
@@ -133,10 +145,35 @@ impl Command for CommandRequest {
             CommandRequest::Close(local) => stop_tunnel(&local, ctx).into(),
             CommandRequest::Invalid(e) => CommandResponse::Problem(Some(e)),
             CommandRequest::Exit => CommandResponse::Done,
-            CommandRequest::Status => CommandResponse::Info {
-                short: format!("Tunnels: {}", ctx.number_of_tunnels()),
-                details: None,
-            },
+            CommandRequest::Status(long) => {
+                if ctx.number_of_tunnels() == 0 {
+                    CommandResponse::Info {
+                        short: format!("No tunnels"),
+                        details: None,
+                    }
+                } else {
+                    let short = format!("Tunnels: {}", ctx.number_of_tunnels());
+                    let details = if long {
+                        let details: Vec<String> = ctx
+                            .stats_iter()
+                            .map(|(local, stats)| {
+                                format!(
+                                    "{} = open conns {}, total {}, bytes sent {}, received {}",
+                                    local,
+                                    stats.streams_open,
+                                    stats.total_connections,
+                                    stats.bytes_sent,
+                                    stats.bytes_received
+                                )
+                            })
+                            .collect();
+                        Some(details)
+                    } else {
+                        None
+                    };
+                    CommandResponse::Info { short, details }
+                }
+            }
             CommandRequest::Help => {
                 let help = &[
                     "OPEN tunnel",

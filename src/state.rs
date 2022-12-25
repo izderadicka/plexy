@@ -6,22 +6,24 @@ use crate::{
     Tunnel,
 };
 
-#[derive(Debug)]
-pub struct TunnelInfo {
+#[derive(Debug, Default, Clone)]
+pub struct TunnelStats {
     pub bytes_sent: u64,
     pub streams_open: usize,
     pub bytes_received: u64,
     pub total_connections: u64,
+}
+
+#[derive(Debug)]
+pub struct TunnelInfo {
+    pub stats: TunnelStats,
     pub close_channel: oneshot::Sender<()>,
 }
 
 impl TunnelInfo {
     pub fn new(close_channel: oneshot::Sender<()>) -> Self {
         TunnelInfo {
-            streams_open: 0,
-            bytes_sent: 0,
-            bytes_received: 0,
-            total_connections: 0,
+            stats: TunnelStats::default(),
             close_channel,
         }
     }
@@ -63,5 +65,36 @@ impl State {
 
     pub fn number_of_tunnels(&self) -> usize {
         self.tunnels.len()
+    }
+
+    pub fn client_connected(&self, local: &SocketAddr, _client_addr: Option<&SocketAddr>) {
+        if let Some(mut rec) = self.tunnels.get_mut(local) {
+            rec.stats.total_connections += 1;
+            rec.stats.streams_open += 1;
+        };
+    }
+
+    pub fn update_stats(
+        &self,
+        local: &SocketAddr,
+        received: u64,
+        sent: u64,
+        _client_addr: Option<&SocketAddr>,
+    ) {
+        if let Some(mut rec) = self.tunnels.get_mut(local) {
+            rec.stats.bytes_received += received;
+            rec.stats.bytes_sent += sent;
+        };
+    }
+
+    pub fn client_disconnected(&self, local: &SocketAddr, _client_addr: Option<&SocketAddr>) {
+        if let Some(mut rec) = self.tunnels.get_mut(local) {
+            rec.stats.streams_open -= 1;
+        }
+    }
+
+    pub fn stats_iter(&self) -> impl Iterator<Item = (SocketAddr, TunnelStats)> + '_ {
+        let iter = self.tunnels.iter();
+        iter.map(|i| (i.key().clone(), i.value().stats.clone()))
     }
 }
