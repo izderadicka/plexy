@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use crate::Tunnel;
 
-#[derive(Parser)]
+#[derive(Parser, Clone, Debug)]
 #[command(author, version, about)]
 pub struct Args {
     #[arg(
@@ -18,7 +18,16 @@ pub struct Args {
         num_args = 0..1024,
         help = "initial tunnels as port=>remote_addr:port, or local_addr:port=>remote_addr:port - either as separate arguments or separated by comma"
     )]
-    pub tunnels: Vec<Tunnel>,
+    pub tunnels: Option<Vec<Tunnel>>,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Args {
+            control_socket: "127.0.0.1:9999".parse().unwrap(),
+            tunnels: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -35,6 +44,6 @@ mod tests {
             "0.0.0.0:4444=127.0.0.1:4000",
         ])
         .expect("valid params");
-        assert_eq!(2, args.tunnels.len());
+        assert_eq!(2, args.tunnels.unwrap().len());
     }
 }

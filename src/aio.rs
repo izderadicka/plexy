@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-const DEFAULT_BUF_SIZE: usize = 8192;
+use crate::DEFAULT_BUF_SIZE;
 
 #[derive(Debug)]
 pub(super) struct CopyBuffer {

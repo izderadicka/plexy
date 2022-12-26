@@ -6,16 +6,20 @@ use tracing::{error, info};
 #[tokio::main]
 async fn main() -> io::Result<()> {
     tracing_subscriber::fmt::init();
-    let args = Args::parse();
-    info!(tunnels = args.tunnels.len(), "Started plexy");
+    let mut args = Args::parse();
+    info!(tunnels = ?args.tunnels, "Started plexy");
     info!("Control interface listening on {}", args.control_socket);
-    let state = State::new();
-    tokio::spawn(run_controller(args.control_socket, state.clone()));
+    let tunnels = args.tunnels.take();
+    let control_socket = args.control_socket.clone();
+    let state = State::new(args);
+    tokio::spawn(run_controller(control_socket, state.clone()));
     // launch tunnels
-    for tunnel in args.tunnels {
-        if let Err(e) = start_tunnel(tunnel.clone(), state.clone()).await {
-            error!("Cannot start tunnel {:?}: {}", tunnel, e);
-        };
+    if let Some(tunnels) = tunnels {
+        for tunnel in tunnels {
+            if let Err(e) = start_tunnel(tunnel.clone(), state.clone()).await {
+                error!("Cannot start tunnel {:?}: {}", tunnel, e);
+            };
+        }
     }
     std::future::pending::<()>().await;
     Ok(())

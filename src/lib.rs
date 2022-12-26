@@ -2,7 +2,7 @@ use error::{Error, Result};
 use std::{net::SocketAddr, str::FromStr};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::oneshot,
+    sync::watch,
     task::JoinHandle,
 };
 use tracing::{debug, error};
@@ -16,6 +16,8 @@ pub mod config;
 pub mod controller;
 pub mod error;
 mod state;
+
+pub const DEFAULT_BUF_SIZE: usize = 8192;
 
 #[derive(Debug, Clone)]
 pub struct Tunnel {
@@ -78,12 +80,12 @@ pub(crate) struct TunnelHandler {
     state: State,
     tunnel: Tunnel,
     listener: TcpListener,
-    close_channel: oneshot::Receiver<()>,
+    close_channel: watch::Receiver<bool>,
 }
 
 pub fn stop_tunnel(local: &SocketAddr, state: State) -> Result<()> {
     let tunnel_info = state.remove_tunnel(local)?;
-    if let Err(_) = tunnel_info.close_channel.send(()) {
+    if let Err(_) = tunnel_info.close_channel.send(true) {
         error!("Cannot close tunnel")
     }
     Ok(())
@@ -96,7 +98,7 @@ pub async fn start_tunnel(tunnel: Tunnel, state: State) -> Result<JoinHandle<()>
 
 async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
     let listener = TcpListener::bind(tunnel.local).await?;
-    let (sender, receiver) = oneshot::channel();
+    let (sender, receiver) = watch::channel(false);
     state.add_tunnel(tunnel.clone(), sender)?;
     Ok(TunnelHandler {
         state,
@@ -124,7 +126,7 @@ async fn run_tunnel(mut handler: TunnelHandler) {
 
         }
 
-         _ = &mut handler.close_channel => {
+         _ = handler.close_channel.changed() => {
             debug!("Finished tunnel {:?}", handler.tunnel);
             break
          }
@@ -139,9 +141,7 @@ mod tests {
 
     #[test]
     fn test_full() {
-        let t: Tunnel = "0.0.0.0:3333=>127.0.0.1:3000"
-            .parse()
-            .expect("valid tunnel");
+        let t: Tunnel = "0.0.0.0:3333=127.0.0.1:3000".parse().expect("valid tunnel");
         assert_eq!(3333, t.local.port());
         assert_eq!(Ipv4Addr::new(0, 0, 0, 0), t.local.ip());
         assert_eq!(3000, t.remote.port());
