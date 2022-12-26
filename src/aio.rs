@@ -1,13 +1,13 @@
 use futures::ready;
 use std::future::Future;
 use std::io;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-use crate::DEFAULT_BUF_SIZE;
+use crate::State;
 
-#[derive(Debug)]
 pub(super) struct CopyBuffer {
     read_done: bool,
     need_flush: bool,
@@ -15,17 +15,22 @@ pub(super) struct CopyBuffer {
     cap: usize,
     amt: u64,
     buf: Box<[u8]>,
+    update_progress: Box<dyn Fn(u64) + Send>,
 }
 
 impl CopyBuffer {
-    pub(super) fn new() -> Self {
+    pub(super) fn new<F>(buf_size: usize, update_progress: F) -> Self
+    where
+        F: Fn(u64) + Send + 'static,
+    {
         Self {
             read_done: false,
             need_flush: false,
             pos: 0,
             cap: 0,
             amt: 0,
-            buf: vec![0; DEFAULT_BUF_SIZE].into_boxed_slice(),
+            buf: vec![0; buf_size].into_boxed_slice(),
+            update_progress: Box::new(update_progress),
         }
     }
 
@@ -117,6 +122,7 @@ impl CopyBuffer {
                     )));
                 } else {
                     self.pos += i;
+                    (self.update_progress)(i as u64);
                     self.amt += i as u64;
                     self.need_flush = true;
                 }
@@ -210,44 +216,26 @@ where
     }
 }
 
-/// Copies data in both directions between `a` and `b`.
-///
-/// This function returns a future that will read from both streams,
-/// writing any data read to the opposing stream.
-/// This happens in both directions concurrently.
-///
-/// If an EOF is observed on one stream, [`shutdown()`] will be invoked on
-/// the other, and reading from that stream will stop. Copying of data in
-/// the other direction will continue.
-///
-/// The future will complete successfully once both directions of communication has been shut down.
-/// A direction is shut down when the reader reports EOF,
-/// at which point [`shutdown()`] is called on the corresponding writer. When finished,
-/// it will return a tuple of the number of bytes copied from a to b
-/// and the number of bytes copied from b to a, in that order.
-///
-/// [`shutdown()`]: crate::io::AsyncWriteExt::shutdown
-///
-/// # Errors
-///
-/// The future will immediately return an error if any IO operation on `a`
-/// or `b` returns an error. Some data read from either stream may be lost (not
-/// written to the other stream) in this case.
-///
-/// # Return value
-///
-/// Returns a tuple of bytes copied `a` to `b` and bytes copied `b` to `a`.
-#[cfg_attr(docsrs, doc(cfg(feature = "io-util")))]
-pub async fn copy_bidirectional<A, B>(a: &mut A, b: &mut B) -> Result<(u64, u64), std::io::Error>
+pub async fn copy_bidirectional<A, B>(
+    a: &mut A,
+    b: &mut B,
+    tunnel_local: SocketAddr,
+    state: State,
+) -> Result<(u64, u64), std::io::Error>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
     B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
+    let buf_size = state.copy_buffer_size();
+    let local = tunnel_local.clone();
+    let ctx = state.clone();
+    let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, None);
+    let update_recieved = move |bytes| state.update_transferred(&tunnel_local, false, bytes, None);
     CopyBidirectional {
         a,
         b,
-        a_to_b: TransferState::Running(CopyBuffer::new()),
-        b_to_a: TransferState::Running(CopyBuffer::new()),
+        a_to_b: TransferState::Running(CopyBuffer::new(buf_size, update_sent)),
+        b_to_a: TransferState::Running(CopyBuffer::new(buf_size, update_recieved)),
     }
     .await
 }

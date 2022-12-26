@@ -83,16 +83,19 @@ impl State {
         };
     }
 
-    pub fn update_stats(
+    pub fn update_transferred(
         &self,
         local: &SocketAddr,
-        received: u64,
-        sent: u64,
+        sent: bool,
+        bytes: u64,
         _client_addr: Option<&SocketAddr>,
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
-            rec.stats.bytes_received += received;
-            rec.stats.bytes_sent += sent;
+            if sent {
+                rec.stats.bytes_sent += bytes;
+            } else {
+                rec.stats.bytes_received += bytes;
+            }
         };
     }
 
@@ -105,5 +108,10 @@ impl State {
     pub fn stats_iter(&self) -> impl Iterator<Item = (SocketAddr, TunnelStats)> + '_ {
         let iter = self.inner.tunnels.iter();
         iter.map(|i| (i.key().clone(), i.value().stats.clone()))
+    }
+
+    pub fn copy_buffer_size(&self) -> usize {
+        let config = self.inner.config.read();
+        config.copy_buffer_size
     }
 }

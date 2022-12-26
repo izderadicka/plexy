@@ -17,8 +17,6 @@ pub mod controller;
 pub mod error;
 mod state;
 
-pub const DEFAULT_BUF_SIZE: usize = 8192;
-
 #[derive(Debug, Clone)]
 pub struct Tunnel {
     pub local: SocketAddr,
@@ -63,9 +61,9 @@ async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
     state.client_connected(&tunnel.local, remote_client.as_ref());
     match TcpStream::connect(tunnel.remote).await {
         Ok(mut stream) => {
-            match copy_bidirectional(&mut socket, &mut stream).await {
-                Ok((sent, received)) => {
-                    state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
+            match copy_bidirectional(&mut socket, &mut stream, tunnel.local, state.clone()).await {
+                Ok((_sent, _received)) => {
+                    // state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
                 }
                 Err(e) => error!("Error copying between streams: {}", e),
             };

@@ -9,7 +9,7 @@ pub struct Args {
     #[arg(
         short,
         long,
-        help = "Socket address to listen for control commands",
+        help = "socket address to listen for control commands",
         default_value = "127.0.0.1:9999"
     )]
     pub control_socket: SocketAddr,
@@ -19,6 +19,13 @@ pub struct Args {
         help = "initial tunnels as port=>remote_addr:port, or local_addr:port=>remote_addr:port - either as separate arguments or separated by comma"
     )]
     pub tunnels: Option<Vec<Tunnel>>,
+
+    #[arg(
+        long,
+        default_value = "8192",
+        help = "size of buffer used in tunnel stream copying"
+    )]
+    pub copy_buffer_size: usize,
 }
 
 impl Default for Args {
@@ -26,6 +33,7 @@ impl Default for Args {
         Args {
             control_socket: "127.0.0.1:9999".parse().unwrap(),
             tunnels: None,
+            copy_buffer_size: 8192,
         }
     }
 }
