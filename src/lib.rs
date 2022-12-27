@@ -52,7 +52,12 @@ impl FromStr for Tunnel {
     }
 }
 
-async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
+async fn process_socket(
+    mut socket: TcpStream,
+    tunnel: Tunnel,
+    state: State,
+    finish_receiver: watch::Receiver<bool>,
+) {
     let remote_client = socket
         .peer_addr()
         .map_err(|e| error!("Cannot get client address: {}", e))
@@ -61,7 +66,15 @@ async fn process_socket(mut socket: TcpStream, tunnel: Tunnel, state: State) {
     state.client_connected(&tunnel.local, remote_client.as_ref());
     match TcpStream::connect(tunnel.remote).await {
         Ok(mut stream) => {
-            match copy_bidirectional(&mut socket, &mut stream, tunnel.local, state.clone()).await {
+            match copy_bidirectional(
+                &mut socket,
+                &mut stream,
+                tunnel.local,
+                state.clone(),
+                finish_receiver,
+            )
+            .await
+            {
                 Ok((_sent, _received)) => {
                     // state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
                 }
@@ -109,6 +122,7 @@ async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
 async fn run_tunnel(mut handler: TunnelHandler) {
     debug!("Started tunnel {:?}", handler.tunnel);
     loop {
+        let finish_receiver = handler.close_channel.clone();
         tokio::select! {
         socket = handler.listener.accept() => {
             match socket {
@@ -117,6 +131,7 @@ async fn run_tunnel(mut handler: TunnelHandler) {
                     socket,
                     handler.tunnel.clone(),
                     handler.state.clone(),
+                    finish_receiver,
                 ));
             }
             Err(e) => error!("Cannot accept connection: {}", e),

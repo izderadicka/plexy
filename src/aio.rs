@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::watch;
+use tracing::{debug, error};
 
 use crate::State;
 
@@ -16,10 +18,11 @@ pub(super) struct CopyBuffer {
     amt: u64,
     buf: Box<[u8]>,
     update_progress: Box<dyn Fn(u64) + Send>,
+    finish: watch::Receiver<bool>,
 }
 
 impl CopyBuffer {
-    pub(super) fn new<F>(buf_size: usize, update_progress: F) -> Self
+    pub(super) fn new<F>(buf_size: usize, update_progress: F, finish: watch::Receiver<bool>) -> Self
     where
         F: Fn(u64) + Send + 'static,
     {
@@ -31,6 +34,7 @@ impl CopyBuffer {
             amt: 0,
             buf: vec![0; buf_size].into_boxed_slice(),
             update_progress: Box::new(update_progress),
+            finish,
         }
     }
 
@@ -79,6 +83,20 @@ impl CopyBuffer {
         }
     }
 
+    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let finish = self.finish.changed();
+        tokio::pin!(finish);
+        match finish.poll(cx) {
+            Poll::Ready(r) => {
+                if let Err(_e) = r {
+                    error!("finish channel error")
+                }
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
     pub(super) fn poll_copy<R, W>(
         &mut self,
         cx: &mut Context<'_>,
@@ -90,7 +108,11 @@ impl CopyBuffer {
         W: AsyncWrite + ?Sized,
     {
         loop {
-            // If our buffer is empty, then we need to read some data to
+            if matches!(self.poll_finish(cx), Poll::Ready(_)) {
+                debug!("Stream finished by signal");
+                return Poll::Ready(Ok(self.amt));
+            }
+            // // If our buffer is empty, then we need to read some data to
             // continue.
             if self.pos == self.cap && !self.read_done {
                 self.pos = 0;
@@ -204,8 +226,8 @@ where
             b_to_a,
         } = &mut *self;
 
-        let a_to_b = transfer_one_direction(cx, a_to_b, &mut *a, &mut *b)?;
-        let b_to_a = transfer_one_direction(cx, b_to_a, &mut *b, &mut *a)?;
+        let a_to_b = transfer_one_direction(cx, a_to_b, a, b)?;
+        let b_to_a = transfer_one_direction(cx, b_to_a, b, a)?;
 
         // It is not a problem if ready! returns early because transfer_one_direction for the
         // other direction will keep returning TransferState::Done(count) in future calls to poll
@@ -221,6 +243,7 @@ pub async fn copy_bidirectional<A, B>(
     b: &mut B,
     tunnel_local: SocketAddr,
     state: State,
+    finish_receiver: watch::Receiver<bool>,
 ) -> Result<(u64, u64), std::io::Error>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
@@ -229,13 +252,15 @@ where
     let buf_size = state.copy_buffer_size();
     let local = tunnel_local.clone();
     let ctx = state.clone();
+    let finish1 = finish_receiver.clone();
+    let finish2 = finish_receiver;
     let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, None);
     let update_recieved = move |bytes| state.update_transferred(&tunnel_local, false, bytes, None);
     CopyBidirectional {
         a,
         b,
-        a_to_b: TransferState::Running(CopyBuffer::new(buf_size, update_sent)),
-        b_to_a: TransferState::Running(CopyBuffer::new(buf_size, update_recieved)),
+        a_to_b: TransferState::Running(CopyBuffer::new(buf_size, update_sent, finish1)),
+        b_to_a: TransferState::Running(CopyBuffer::new(buf_size, update_recieved, finish2)),
     }
     .await
 }
