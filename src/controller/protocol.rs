@@ -178,7 +178,7 @@ impl Command for CommandRequest {
                 let help = &[
                     "OPEN tunnel",
                     "CLOSE socket_address",
-                    "STATUS [long]",
+                    "STATUS [full|long]",
                     "EXIT",
                     "HELP",
                 ];
