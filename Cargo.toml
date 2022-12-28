@@ -1,6 +1,6 @@
 [package]
 name = "plexy"
-version = "0.2.0"
+version = "0.3.0"
 author = "Ivan"
 about = "Simple dynamic TCP proxy"
 edition = "2021"

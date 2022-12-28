@@ -5,6 +5,7 @@ use tokio::sync::watch;
 use crate::{
     config::Args,
     error::{Error, Result},
+    tunnel::SocketSpec,
     Tunnel,
 };
 
@@ -32,7 +33,7 @@ impl TunnelInfo {
 }
 
 struct StateInner {
-    tunnels: dashmap::DashMap<SocketAddr, TunnelInfo, fxhash::FxBuildHasher>,
+    tunnels: dashmap::DashMap<SocketSpec, TunnelInfo, fxhash::FxBuildHasher>,
     config: RwLock<Args>,
 }
 
@@ -64,7 +65,7 @@ impl State {
         Ok(())
     }
 
-    pub(crate) fn remove_tunnel(&self, local: &SocketAddr) -> Result<TunnelInfo> {
+    pub(crate) fn remove_tunnel(&self, local: &SocketSpec) -> Result<TunnelInfo> {
         self.inner
             .tunnels
             .remove(local)
@@ -76,7 +77,7 @@ impl State {
         self.inner.tunnels.len()
     }
 
-    pub fn client_connected(&self, local: &SocketAddr, _client_addr: Option<&SocketAddr>) {
+    pub fn client_connected(&self, local: &SocketSpec, _client_addr: Option<&SocketAddr>) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             rec.stats.total_connections += 1;
             rec.stats.streams_open += 1;
@@ -85,7 +86,7 @@ impl State {
 
     pub fn update_transferred(
         &self,
-        local: &SocketAddr,
+        local: &SocketSpec,
         sent: bool,
         bytes: u64,
         _client_addr: Option<&SocketAddr>,
@@ -99,13 +100,13 @@ impl State {
         };
     }
 
-    pub fn client_disconnected(&self, local: &SocketAddr, _client_addr: Option<&SocketAddr>) {
+    pub fn client_disconnected(&self, local: &SocketSpec, _client_addr: Option<&SocketAddr>) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             rec.stats.streams_open -= 1;
         }
     }
 
-    pub fn stats_iter(&self) -> impl Iterator<Item = (SocketAddr, TunnelStats)> + '_ {
+    pub fn stats_iter(&self) -> impl Iterator<Item = (SocketSpec, TunnelStats)> + '_ {
         let iter = self.inner.tunnels.iter();
         iter.map(|i| (i.key().clone(), i.value().stats.clone()))
     }

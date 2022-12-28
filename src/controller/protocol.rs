@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, str::FromStr};
+use std::str::FromStr;
 
 use async_trait::async_trait;
 use tokio::net::TcpStream;
@@ -6,7 +6,9 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::{
     error::{Error, Result},
-    start_tunnel, stop_tunnel, State, Tunnel,
+    start_tunnel, stop_tunnel,
+    tunnel::SocketSpec,
+    State, Tunnel,
 };
 
 use self::codec::CommandCodec;
@@ -34,7 +36,7 @@ pub trait Command: FromStr {
 #[derive(Debug)]
 pub enum CommandRequest {
     Open(Tunnel),
-    Close(SocketAddr),
+    Close(SocketSpec),
     Status(bool),
     Help,
     Exit,
@@ -76,7 +78,7 @@ impl FromStr for CommandRequest {
             "HELP" => Ok(CommandRequest::Help),
             "EXIT" => Ok(CommandRequest::Exit),
             "CLOSE" => {
-                let addr: SocketAddr = args()?.parse()?;
+                let addr: SocketSpec = args()?.parse()?;
                 Ok(CommandRequest::Close(addr))
             }
             _ => Err(Error::ControlProtocolError(format!(

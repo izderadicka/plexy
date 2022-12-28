@@ -1,13 +1,13 @@
 use futures::ready;
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::watch;
 use tracing::{debug, error};
 
+use crate::tunnel::SocketSpec;
 use crate::State;
 
 pub(super) struct CopyBuffer<'a> {
@@ -242,7 +242,7 @@ where
 pub async fn copy_bidirectional<A, B>(
     a: &mut A,
     b: &mut B,
-    tunnel_local: SocketAddr,
+    tunnel_local: SocketSpec,
     state: State,
     mut finish_receiver: watch::Receiver<bool>,
 ) -> Result<(u64, u64), std::io::Error>
