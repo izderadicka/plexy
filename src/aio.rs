@@ -10,7 +10,7 @@ use tracing::{debug, error};
 
 use crate::State;
 
-pub(super) struct CopyBuffer {
+pub(super) struct CopyBuffer<'a> {
     read_done: bool,
     need_flush: bool,
     pos: usize,
@@ -18,11 +18,11 @@ pub(super) struct CopyBuffer {
     amt: u64,
     buf: Box<[u8]>,
     update_progress: Box<dyn Fn(u64) + Send>,
-    finish: watch::Receiver<bool>,
+    finish: FinishFuture<'a>,
 }
 
-impl CopyBuffer {
-    pub(super) fn new<F>(buf_size: usize, update_progress: F, finish: watch::Receiver<bool>) -> Self
+impl<'a> CopyBuffer<'a> {
+    pub(super) fn new<F>(buf_size: usize, update_progress: F, finish: FinishFuture<'a>) -> Self
     where
         F: Fn(u64) + Send + 'static,
     {
@@ -84,9 +84,7 @@ impl CopyBuffer {
     }
 
     fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        let finish = self.finish.changed();
-        tokio::pin!(finish);
-        match finish.poll(cx) {
+        match self.finish.as_mut().poll(cx) {
             Poll::Ready(r) => {
                 if let Err(_e) = r {
                     error!("finish channel error")
@@ -168,17 +166,20 @@ impl CopyBuffer {
     }
 }
 
-enum TransferState {
-    Running(CopyBuffer),
+enum TransferState<'a> {
+    Running(CopyBuffer<'a>),
     ShuttingDown(u64),
     Done(u64),
 }
 
+type FinishFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), watch::error::RecvError>> + 'a + Send>>;
+
 struct CopyBidirectional<'a, A: ?Sized, B: ?Sized> {
     a: &'a mut A,
     b: &'a mut B,
-    a_to_b: TransferState,
-    b_to_a: TransferState,
+    a_to_b: TransferState<'a>,
+    b_to_a: TransferState<'a>,
 }
 
 fn transfer_one_direction<A, B>(
@@ -243,7 +244,7 @@ pub async fn copy_bidirectional<A, B>(
     b: &mut B,
     tunnel_local: SocketAddr,
     state: State,
-    finish_receiver: watch::Receiver<bool>,
+    mut finish_receiver: watch::Receiver<bool>,
 ) -> Result<(u64, u64), std::io::Error>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
@@ -252,8 +253,11 @@ where
     let buf_size = state.copy_buffer_size();
     let local = tunnel_local.clone();
     let ctx = state.clone();
-    let finish1 = finish_receiver.clone();
-    let finish2 = finish_receiver;
+    let mut finish1 = finish_receiver.clone();
+    let finish1 = finish1.changed();
+    let finish1 = Box::pin(finish1);
+    let finish2 = finish_receiver.changed();
+    let finish2 = Box::pin(finish2);
     let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, None);
     let update_recieved = move |bytes| state.update_transferred(&tunnel_local, false, bytes, None);
     CopyBidirectional {
