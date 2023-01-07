@@ -1,16 +1,20 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, sync::Arc};
 
 use crate::error::{Error, Result};
 
+/// This is our equivalence to SocketAddr, but with host name
+/// As it is expected to move around thread frequently,
+/// host name is an immutable string in Arc,
+/// Which is better for cloning
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SocketSpec {
-    host: String,
+    host: Arc<str>,
     port: u16,
 }
 
 impl SocketSpec {
     pub fn as_tuple(&self) -> (&str, u16) {
-        (self.host.as_str(), self.port)
+        (&*self.host, self.port)
     }
 
     pub fn port(&self) -> u16 {
@@ -18,7 +22,7 @@ impl SocketSpec {
     }
 
     pub fn host(&self) -> &str {
-        self.host.as_str()
+        &*self.host
     }
 }
 
@@ -41,7 +45,7 @@ impl FromStr for SocketSpec {
                     .parse()
                     .map_err(|_e| Error::SocketSpecParseError("Invalid port number".into()))?;
                 Ok(SocketSpec {
-                    host: host.to_string(),
+                    host: host.into(),
                     port,
                 })
             }
