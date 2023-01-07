@@ -115,4 +115,8 @@ impl State {
         let config = self.inner.config.read();
         config.copy_buffer_size
     }
+
+    pub fn establish_remote_connection_timeout(&self) -> f32 {
+        self.inner.config.read().establish_remote_connection_timeout
+    }
 }

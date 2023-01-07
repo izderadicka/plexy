@@ -1,9 +1,12 @@
+use std::time::Duration;
+
 use error::Result;
 
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
     task::JoinHandle,
+    time::timeout,
 };
 use tracing::{debug, error};
 use tunnel::SocketSpec;
@@ -32,8 +35,14 @@ async fn process_socket(
         .ok();
     debug!(client = ?remote_client, "Client connected");
     state.client_connected(&tunnel.local, remote_client.as_ref());
-    match TcpStream::connect(tunnel.remote.as_tuple()).await {
-        Ok(mut stream) => {
+    let conn_timeout = state.establish_remote_connection_timeout();
+    match timeout(
+        Duration::from_secs_f32(conn_timeout),
+        TcpStream::connect(tunnel.remote.as_tuple()),
+    )
+    .await
+    {
+        Ok(Ok(mut stream)) => {
             match copy_bidirectional(
                 &mut socket,
                 &mut stream,
@@ -49,7 +58,8 @@ async fn process_socket(
                 Err(e) => error!("Error copying between streams: {}", e),
             };
         }
-        Err(e) => error!("Error while connecting to remote {}: {}", tunnel.remote, e),
+        Ok(Err(e)) => error!("Error while connecting to remote {}: {}", tunnel.remote, e),
+        Err(_) => error!("Timeout while connecting to remote {}", tunnel.remote),
     }
     state.client_disconnected(&tunnel.local, remote_client.as_ref());
     debug!(client = ?remote_client, "Client disconnected");

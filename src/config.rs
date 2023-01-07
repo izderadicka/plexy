@@ -26,6 +26,13 @@ pub struct Args {
         help = "size of buffer used in tunnel stream copying"
     )]
     pub copy_buffer_size: usize,
+
+    #[arg(
+        long,
+        default_value = "10",
+        help = "timeout for establishing remote connection is seconds (decimals allowed)"
+    )]
+    pub establish_remote_connection_timeout: f32,
 }
 
 impl Default for Args {
@@ -34,6 +41,7 @@ impl Default for Args {
             control_socket: "127.0.0.1:9999".parse().unwrap(),
             tunnels: None,
             copy_buffer_size: 8192,
+            establish_remote_connection_timeout: 10.0,
         }
     }
 }
