@@ -1,8 +1,5 @@
-use std::{fmt::Display, str::FromStr, sync::Arc};
-
-use rand::Rng;
-
 use crate::error::{Error, Result};
+use std::{fmt::Display, str::FromStr, sync::Arc};
 
 /// This is our equivalence to SocketAddr, but with host name
 /// As it is expected to move around thread frequently,
@@ -66,17 +63,6 @@ impl Display for SocketSpec {
 pub struct Tunnel {
     pub local: SocketSpec,
     pub remote: Vec<SocketSpec>,
-}
-
-impl Tunnel {
-    pub fn select_remote(&self) -> Result<&SocketSpec> {
-        let size = self.remote.len();
-        if size == 0 {
-            return Err(Error::NoRemote);
-        }
-        let idx: usize = rand::thread_rng().gen_range(0..size);
-        Ok(&self.remote[idx])
-    }
 }
 
 impl std::fmt::Display for Tunnel {

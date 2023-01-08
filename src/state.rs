@@ -1,4 +1,6 @@
+use indexmap::IndexMap;
 use parking_lot::RwLock;
+use rand::Rng;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 
@@ -21,14 +23,30 @@ pub struct TunnelStats {
 pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
+    pub remotes: IndexMap<SocketSpec, (), fxhash::FxBuildHasher>,
 }
 
 impl TunnelInfo {
-    pub fn new(close_channel: watch::Sender<bool>) -> Self {
+    pub fn new(close_channel: watch::Sender<bool>, remotes: Vec<SocketSpec>) -> Self {
         TunnelInfo {
             stats: TunnelStats::default(),
             close_channel,
+            remotes: remotes.into_iter().map(|k| (k, ())).collect(),
         }
+    }
+}
+
+impl TunnelInfo {
+    pub fn select_remote(&self) -> Result<&SocketSpec> {
+        let size = self.remotes.len();
+        if size == 0 {
+            return Err(Error::NoRemote);
+        }
+        let idx: usize = rand::thread_rng().gen_range(0..size);
+        self.remotes
+            .get_index(idx)
+            .map(|(k, _)| k)
+            .ok_or_else(|| Error::NoRemote)
     }
 }
 
@@ -52,6 +70,14 @@ impl State {
         }
     }
 
+    pub fn select_remote(&self, tunnel_key: &SocketSpec) -> Result<SocketSpec> {
+        self.inner
+            .tunnels
+            .get(tunnel_key)
+            .ok_or_else(|| Error::TunnelDoesNotExist)
+            .and_then(|info| info.select_remote().map(|socket| socket.clone()))
+    }
+
     pub(crate) fn add_tunnel(
         &self,
         tunnel: Tunnel,
@@ -60,7 +86,7 @@ impl State {
         if self.inner.tunnels.contains_key(&tunnel.local) {
             return Err(Error::TunnelExists);
         }
-        let info = TunnelInfo::new(close_channel);
+        let info = TunnelInfo::new(close_channel, tunnel.remote);
         self.inner.tunnels.insert(tunnel.local, info);
         Ok(())
     }

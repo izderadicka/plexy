@@ -829,6 +829,7 @@ dependencies = [
  "features",
  "futures",
  "fxhash",
+ "indexmap",
  "parking_lot",
  "rand",
  "thiserror",
