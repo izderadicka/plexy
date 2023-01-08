@@ -16,6 +16,8 @@ pub enum Error {
     ControlProtocolLineError(#[from] tokio_util::codec::LinesCodecError),
     #[error("Control protocol error: {0}")]
     ControlProtocolError(String),
+    #[error("No remote available")]
+    NoRemote,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

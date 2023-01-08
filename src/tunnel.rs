@@ -1,5 +1,7 @@
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
+use rand::Rng;
+
 use crate::error::{Error, Result};
 
 /// This is our equivalence to SocketAddr, but with host name
@@ -63,12 +65,31 @@ impl Display for SocketSpec {
 #[derive(Debug, Clone)]
 pub struct Tunnel {
     pub local: SocketSpec,
-    pub remote: SocketSpec,
+    pub remote: Vec<SocketSpec>,
+}
+
+impl Tunnel {
+    pub fn select_remote(&self) -> Result<&SocketSpec> {
+        let size = self.remote.len();
+        if size == 0 {
+            return Err(Error::NoRemote);
+        }
+        let idx: usize = rand::thread_rng().gen_range(0..size);
+        Ok(&self.remote[idx])
+    }
 }
 
 impl std::fmt::Display for Tunnel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}={}", self.local, self.remote)
+        write!(f, "{}=", self.local)?;
+        for (n, addr) in self.remote.iter().enumerate() {
+            if n > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", addr)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -79,9 +100,19 @@ impl FromStr for Tunnel {
         let (local_part, remote_part) = s
             .split_once("=")
             .ok_or_else(|| Error::TunnelParseError(format!("Missing = in tunnel definition")))?;
-        let remote: SocketSpec = remote_part.parse()?;
+        let remotes = remote_part.split(",");
+        let remotes: Result<Vec<SocketSpec>> = remotes.map(|s| s.parse()).collect();
+        let remotes = remotes?;
+        if remotes.is_empty() {
+            return Err(Error::TunnelParseError(
+                "At least one remote address is needed".into(),
+            ));
+        }
         let local: SocketSpec = local_part.parse()?;
-        Ok(Tunnel { local, remote })
+        Ok(Tunnel {
+            local,
+            remote: remotes,
+        })
     }
 }
 
@@ -94,8 +125,8 @@ mod tests {
         let t: Tunnel = "0.0.0.0:3333=127.0.0.1:3000".parse().expect("valid tunnel");
         assert_eq!(3333, t.local.port());
         assert_eq!("0.0.0.0", t.local.host());
-        assert_eq!(3000, t.remote.port());
-        assert_eq!("127.0.0.1", t.remote.host());
+        assert_eq!(3000, t.remote[0].port());
+        assert_eq!("127.0.0.1", t.remote[1].host());
     }
 
     #[test]
@@ -103,7 +134,7 @@ mod tests {
         let t: Tunnel = "3333=127.0.0.1:3000".parse().expect("valid tunnel");
         assert_eq!(3333, t.local.port());
         assert_eq!("127.0.0.1", t.local.host());
-        assert_eq!(3000, t.remote.port());
-        assert_eq!("127.0.0.1", t.remote.host());
+        assert_eq!(3000, t.remote[0].port());
+        assert_eq!("127.0.0.1", t.remote[0].host());
     }
 }

@@ -1,7 +1,8 @@
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use error::Result;
 
+use futures::TryFutureExt;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
@@ -25,20 +26,18 @@ pub mod tunnel;
 
 async fn process_socket(
     mut socket: TcpStream,
+    local_client: SocketAddr,
     tunnel: Tunnel,
     state: State,
     finish_receiver: watch::Receiver<bool>,
-) {
-    let remote_client = socket
-        .peer_addr()
-        .map_err(|e| error!("Cannot get client address: {}", e))
-        .ok();
-    debug!(client = ?remote_client, "Client connected");
-    state.client_connected(&tunnel.local, remote_client.as_ref());
+) -> Result<()> {
+    debug!(client = ?local_client, "Client connected");
+    state.client_connected(&tunnel.local, &local_client);
     let conn_timeout = state.establish_remote_connection_timeout();
+    let remote = tunnel.select_remote()?;
     match timeout(
         Duration::from_secs_f32(conn_timeout),
-        TcpStream::connect(tunnel.remote.as_tuple()),
+        TcpStream::connect(remote.as_tuple()),
     )
     .await
     {
@@ -47,6 +46,7 @@ async fn process_socket(
                 &mut socket,
                 &mut stream,
                 tunnel.local.clone(),
+                local_client,
                 state.clone(),
                 finish_receiver,
             )
@@ -58,11 +58,12 @@ async fn process_socket(
                 Err(e) => error!("Error copying between streams: {}", e),
             };
         }
-        Ok(Err(e)) => error!("Error while connecting to remote {}: {}", tunnel.remote, e),
-        Err(_) => error!("Timeout while connecting to remote {}", tunnel.remote),
+        Ok(Err(e)) => error!("Error while connecting to remote {}: {}", remote, e),
+        Err(_) => error!("Timeout while connecting to remote {}", remote),
     }
-    state.client_disconnected(&tunnel.local, remote_client.as_ref());
-    debug!(client = ?remote_client, "Client disconnected");
+    state.client_disconnected(&tunnel.local, &local_client);
+    debug!(client = ?local_client, "Client disconnected");
+    Ok(())
 }
 
 pub(crate) struct TunnelHandler {
@@ -104,13 +105,14 @@ async fn run_tunnel(mut handler: TunnelHandler) {
         tokio::select! {
         socket = handler.listener.accept() => {
             match socket {
-            Ok((socket, _remote)) => {
+            Ok((socket, client_addr)) => {
                 tokio::spawn(process_socket(
                     socket,
+                    client_addr,
                     handler.tunnel.clone(),
                     handler.state.clone(),
                     finish_receiver,
-                ));
+                ).map_err(|e| error!("Error in remote connection: {}", e)));
             }
             Err(e) => error!("Cannot accept connection: {}", e),
         }

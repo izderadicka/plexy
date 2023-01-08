@@ -1,6 +1,7 @@
 use futures::ready;
 use std::future::Future;
 use std::io;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -243,6 +244,7 @@ pub async fn copy_bidirectional<A, B>(
     a: &mut A,
     b: &mut B,
     tunnel_local: SocketSpec,
+    client_addr: SocketAddr,
     state: State,
     mut finish_receiver: watch::Receiver<bool>,
 ) -> Result<(u64, u64), std::io::Error>
@@ -258,8 +260,9 @@ where
     let finish1 = Box::pin(finish1);
     let finish2 = finish_receiver.changed();
     let finish2 = Box::pin(finish2);
-    let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, None);
-    let update_recieved = move |bytes| state.update_transferred(&tunnel_local, false, bytes, None);
+    let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, client_addr);
+    let update_recieved =
+        move |bytes| state.update_transferred(&tunnel_local, false, bytes, client_addr);
     CopyBidirectional {
         a,
         b,

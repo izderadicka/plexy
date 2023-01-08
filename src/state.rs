@@ -77,7 +77,7 @@ impl State {
         self.inner.tunnels.len()
     }
 
-    pub fn client_connected(&self, local: &SocketSpec, _client_addr: Option<&SocketAddr>) {
+    pub fn client_connected(&self, local: &SocketSpec, _client_addr: &SocketAddr) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             rec.stats.total_connections += 1;
             rec.stats.streams_open += 1;
@@ -89,7 +89,7 @@ impl State {
         local: &SocketSpec,
         sent: bool,
         bytes: u64,
-        _client_addr: Option<&SocketAddr>,
+        _client_addr: SocketAddr,
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             if sent {
@@ -100,7 +100,7 @@ impl State {
         };
     }
 
-    pub fn client_disconnected(&self, local: &SocketSpec, _client_addr: Option<&SocketAddr>) {
+    pub fn client_disconnected(&self, local: &SocketSpec, _client_addr: &SocketAddr) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             rec.stats.streams_open -= 1;
         }
