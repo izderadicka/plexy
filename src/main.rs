@@ -5,7 +5,8 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    tracing_subscriber::fmt::init();
+    console_subscriber::init();
+    //tracing_subscriber::fmt::init();
     let mut args = Args::parse();
     info!(tunnels = ?args.tunnels, "Started plexy");
     info!("Control interface listening on {}", args.control_socket);
