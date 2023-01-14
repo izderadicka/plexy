@@ -24,7 +24,7 @@ async fn control_loop(mut socket: TcpStream, ctx: State) {
                 cmd.exec(ctx.clone()).await
             }
             Err(e) => {
-                error!(error = e.to_string(), "Protocol error");
+                error!(error = %e, "Protocol error");
                 CommandResponse::Problem(Some(e))
             }
         };
@@ -33,7 +33,7 @@ async fn control_loop(mut socket: TcpStream, ctx: State) {
         }
 
         if let Err(e) = writer.send(resp).await {
-            error!(error = e.to_string(), "Cannot send response");
+            error!(error = %e, "Cannot send response");
         }
     }
     debug!("Closed control connection")

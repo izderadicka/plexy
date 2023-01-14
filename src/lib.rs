@@ -9,7 +9,7 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 use tunnel::SocketSpec;
 
 pub use state::State;
@@ -24,6 +24,7 @@ pub mod error;
 mod state;
 pub mod tunnel;
 
+#[instrument(skip_all, fields(client=%local_client))]
 async fn process_socket(
     mut socket: TcpStream,
     local_client: SocketAddr,
@@ -31,38 +32,69 @@ async fn process_socket(
     state: State,
     finish_receiver: watch::Receiver<bool>,
 ) -> Result<()> {
-    debug!(client = ?local_client, "Client connected");
+    debug!("Client connected");
     state.client_connected(&tunnel_key, &local_client);
     let conn_timeout = state.establish_remote_connection_timeout();
-    let remote = state.select_remote(&tunnel_key)?;
-    match timeout(
-        Duration::from_secs_f32(conn_timeout),
-        TcpStream::connect(remote.as_tuple()),
-    )
-    .await
-    {
-        Ok(Ok(mut stream)) => {
-            match copy_bidirectional(
-                &mut socket,
-                &mut stream,
-                tunnel_key.clone(),
-                local_client,
-                state.clone(),
-                finish_receiver,
-            )
-            .await
-            {
-                Ok((_sent, _received)) => {
-                    // state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
+    let mut retries = state.establish_remote_connection_retries();
+    let mut last_remote = None;
+    while retries > 0 {
+        match state.select_remote(&tunnel_key) {
+            Ok(remote) => {
+                debug!(remote=%remote, "Selected remote");
+                match timeout(
+                    Duration::from_secs_f32(conn_timeout),
+                    TcpStream::connect(remote.as_tuple()),
+                )
+                .await
+                {
+                    Ok(Ok(mut stream)) => {
+                        state.remote_connected(&tunnel_key, &remote, &local_client);
+                        last_remote = Some(remote);
+                        match copy_bidirectional(
+                            &mut socket,
+                            &mut stream,
+                            tunnel_key.clone(),
+                            local_client,
+                            state.clone(),
+                            finish_receiver,
+                        )
+                        .await
+                        {
+                            Ok((_sent, _received)) => {
+                                // state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
+                            }
+                            Err(e) => {
+                                error!(error=%e, "Error copying between streams")
+                            }
+                        };
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        state.remote_error(&tunnel_key, &remote, &local_client);
+                        error!(error=%e, remote=%remote,
+                            "Error while connecting to remote");
+                    }
+                    Err(_) => {
+                        state.remote_error(&tunnel_key, &remote, &local_client);
+                        error!( remote=%remote,
+                            "Timeout while connecting to remote");
+                    }
                 }
-                Err(e) => error!("Error copying between streams: {}", e),
-            };
-        }
-        Ok(Err(e)) => error!("Error while connecting to remote {}: {}", remote, e),
-        Err(_) => error!("Timeout while connecting to remote {}", remote),
+            }
+            Err(e) => {
+                error!(error=%e, "Cannot get available remote");
+                last_remote = None;
+                break;
+            }
+        };
+        retries -= 1;
+        debug!("Retrying to connect remote");
     }
-    state.client_disconnected(&tunnel_key, &local_client);
-    debug!(client = ?local_client, "Client disconnected");
+    if retries == 0 {
+        error!("Closing connection in tunnel as cannot establish connection to remote end");
+    }
+    state.client_disconnected(&tunnel_key, last_remote.as_ref(), &local_client);
+    debug!("Client disconnected");
     Ok(())
 }
 
@@ -75,8 +107,8 @@ pub(crate) struct TunnelHandler {
 
 pub fn stop_tunnel(local: &SocketSpec, state: State) -> Result<()> {
     let tunnel_info = state.remove_tunnel(local)?;
-    if let Err(_) = tunnel_info.close_channel.send(true) {
-        error!("Cannot close tunnel")
+    if let Err(e) = tunnel_info.close_channel.send(true) {
+        error!(tunnel=%local, error=%e, "Cannot close tunnel")
     }
     Ok(())
 }
@@ -99,8 +131,9 @@ async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
     })
 }
 
+#[instrument(skip_all, fields(tunnel=%handler.tunnel_key))]
 async fn run_tunnel(mut handler: TunnelHandler) {
-    debug!("Started tunnel {:?}", handler.tunnel_key);
+    debug!("Started tunnel");
     let tunnel_key = handler.tunnel_key;
     loop {
         let finish_receiver = handler.close_channel.clone();
@@ -114,15 +147,15 @@ async fn run_tunnel(mut handler: TunnelHandler) {
                     tunnel_key.clone(),
                     handler.state.clone(),
                     finish_receiver,
-                ).map_err(|e| error!("Error in remote connection: {}", e)));
+                ).map_err(move |e| error!(error=%e, "Error in remote connection")));
             }
-            Err(e) => error!("Cannot accept connection: {}", e),
+            Err(e) => error!(error=%e, "Cannot accept connection"),
         }
 
         }
 
          _ = handler.close_channel.changed() => {
-            debug!("Finished tunnel {:?}", tunnel_key);
+            debug!("Finished tunnel");
             break
          }
         }

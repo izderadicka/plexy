@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use rand::Rng;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
 
 use crate::{
@@ -23,7 +23,7 @@ pub struct TunnelStats {
 pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
-    pub remotes: IndexMap<SocketSpec, (), fxhash::FxBuildHasher>,
+    pub remotes: IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>,
 }
 
 impl TunnelInfo {
@@ -31,7 +31,10 @@ impl TunnelInfo {
         TunnelInfo {
             stats: TunnelStats::default(),
             close_channel,
-            remotes: remotes.into_iter().map(|k| (k, ())).collect(),
+            remotes: remotes
+                .into_iter()
+                .map(|k| (k, RemoteInfo::default()))
+                .collect(),
         }
     }
 }
@@ -48,6 +51,17 @@ impl TunnelInfo {
             .map(|(k, _)| k)
             .ok_or_else(|| Error::NoRemote)
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct RemoteInfo {
+    pub bytes_sent: u64,
+    pub streams_open: usize,
+    pub bytes_received: u64,
+    pub total_connections: u64,
+    pub last_error_time: Option<Instant>,
+    pub num_errors: u64,
+    pub total_errors: u64,
 }
 
 struct StateInner {
@@ -110,6 +124,31 @@ impl State {
         };
     }
 
+    pub fn remote_connected(
+        &self,
+        local: &SocketSpec,
+        remote: &SocketSpec,
+        _client_addr: &SocketAddr,
+    ) {
+        if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
+            if let Some(rec) = rec.remotes.get_mut(remote) {
+                rec.streams_open += 1;
+                rec.total_connections += 1;
+                rec.num_errors = 0;
+            }
+        };
+    }
+
+    pub fn remote_error(&self, local: &SocketSpec, remote: &SocketSpec, _client_addr: &SocketAddr) {
+        if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
+            if let Some(rec) = rec.remotes.get_mut(remote) {
+                rec.total_errors += 1;
+                rec.num_errors += 1;
+                rec.last_error_time = Some(Instant::now());
+            }
+        }
+    }
+
     pub fn update_transferred(
         &self,
         local: &SocketSpec,
@@ -126,9 +165,20 @@ impl State {
         };
     }
 
-    pub fn client_disconnected(&self, local: &SocketSpec, _client_addr: &SocketAddr) {
+    pub fn client_disconnected(
+        &self,
+        local: &SocketSpec,
+        remote: Option<&SocketSpec>,
+        _client_addr: &SocketAddr,
+    ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             rec.stats.streams_open -= 1;
+            //TODO: refactor when if let chain will become stable
+            if let Some(remote) = remote {
+                if let Some(rec) = rec.remotes.get_mut(remote) {
+                    rec.streams_open -= 1;
+                }
+            }
         }
     }
 
@@ -144,5 +194,9 @@ impl State {
 
     pub fn establish_remote_connection_timeout(&self) -> f32 {
         self.inner.config.read().establish_remote_connection_timeout
+    }
+
+    pub fn establish_remote_connection_retries(&self) -> u16 {
+        self.inner.config.read().establish_remote_connection_retries
     }
 }
