@@ -17,6 +17,7 @@ pub struct TunnelStats {
     pub streams_open: usize,
     pub bytes_received: u64,
     pub total_connections: u64,
+    pub errors: u64,
 }
 
 #[derive(Debug)]
@@ -141,6 +142,7 @@ impl State {
 
     pub fn remote_error(&self, local: &SocketSpec, remote: &SocketSpec, _client_addr: &SocketAddr) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
+            rec.stats.errors += 1;
             if let Some(rec) = rec.remotes.get_mut(remote) {
                 rec.total_errors += 1;
                 rec.num_errors += 1;
@@ -152,6 +154,7 @@ impl State {
     pub fn update_transferred(
         &self,
         local: &SocketSpec,
+        remote: &SocketSpec,
         sent: bool,
         bytes: u64,
         _client_addr: SocketAddr,
@@ -161,6 +164,13 @@ impl State {
                 rec.stats.bytes_sent += bytes;
             } else {
                 rec.stats.bytes_received += bytes;
+            }
+            if let Some(rec) = rec.remotes.get_mut(remote) {
+                if sent {
+                    rec.bytes_sent += bytes;
+                } else {
+                    rec.bytes_received += bytes;
+                }
             }
         };
     }
@@ -182,9 +192,23 @@ impl State {
         }
     }
 
-    pub fn stats_iter(&self) -> impl Iterator<Item = (SocketSpec, TunnelStats)> + '_ {
+    pub fn stats(&self) -> Vec<(SocketSpec, TunnelStats)> {
         let iter = self.inner.tunnels.iter();
         iter.map(|i| (i.key().clone(), i.value().stats.clone()))
+            .collect()
+    }
+
+    pub fn remotes(&self, local: &SocketSpec) -> Result<Vec<(SocketSpec, RemoteInfo)>> {
+        self.inner
+            .tunnels
+            .get(local)
+            .map(|t| {
+                t.remotes
+                    .iter()
+                    .map(|r| (r.0.clone(), r.1.clone()))
+                    .collect()
+            })
+            .ok_or(Error::TunnelDoesNotExist)
     }
 
     pub fn copy_buffer_size(&self) -> usize {

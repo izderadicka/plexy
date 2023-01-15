@@ -38,6 +38,7 @@ pub enum CommandRequest {
     Open(Tunnel),
     Close(SocketSpec),
     Status(bool),
+    Detail(SocketSpec),
     Help,
     Exit,
     Invalid(Error),
@@ -80,6 +81,10 @@ impl FromStr for CommandRequest {
             "CLOSE" => {
                 let addr: SocketSpec = args()?.parse()?;
                 Ok(CommandRequest::Close(addr))
+            }
+            "DETAIL" => {
+                let addr: SocketSpec = args()?.parse()?;
+                Ok(CommandRequest::Detail(addr))
             }
             _ => Err(Error::ControlProtocolError(format!(
                 "Invalid command: {}",
@@ -157,15 +162,17 @@ impl Command for CommandRequest {
                     let short = format!("Tunnels: {}", ctx.number_of_tunnels());
                     let details = if long {
                         let details: Vec<String> = ctx
-                            .stats_iter()
+                            .stats()
+                            .into_iter()
                             .map(|(local, stats)| {
                                 format!(
-                                    "{} = open conns {}, total {}, bytes sent {}, received {}",
+                                    "{} = open conns {}, total conns {}, bytes sent {}, received {}, total errors {}",
                                     local,
                                     stats.streams_open,
                                     stats.total_connections,
                                     stats.bytes_sent,
-                                    stats.bytes_received
+                                    stats.bytes_received,
+                                    stats.errors,
                                 )
                             })
                             .collect();
@@ -176,11 +183,33 @@ impl Command for CommandRequest {
                     CommandResponse::Info { short, details }
                 }
             }
+            CommandRequest::Detail(local) => match ctx.remotes(&local) {
+                Ok(remotes) => {
+                    let short = format!("Remotes: {}", remotes.len());
+                    let details = remotes.into_iter()
+                        .map(|(remote, info)| format!(
+                        "{} = open conns {}, total conns {}, bytes sent {}, received {}, recent errors {}, total errors {}",
+                            remote,
+                            info.streams_open,
+                            info.total_connections,
+                            info.bytes_sent,
+                            info.bytes_received,
+                            info.num_errors,
+                            info.total_errors,
+                        )).collect();
+                    CommandResponse::Info {
+                        short,
+                        details: Some(details),
+                    }
+                }
+                Err(e) => CommandResponse::Problem(Some(e)),
+            },
             CommandRequest::Help => {
                 let help = &[
                     "OPEN tunnel",
                     "CLOSE socket_address",
                     "STATUS [full|long]",
+                    "DETAIL tunnel",
                     "EXIT",
                     "HELP",
                 ];

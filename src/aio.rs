@@ -244,6 +244,7 @@ pub async fn copy_bidirectional<A, B>(
     a: &mut A,
     b: &mut B,
     tunnel_local: SocketSpec,
+    tunnel_remote: SocketSpec,
     client_addr: SocketAddr,
     state: State,
     mut finish_receiver: watch::Receiver<bool>,
@@ -254,15 +255,18 @@ where
 {
     let buf_size = state.copy_buffer_size();
     let local = tunnel_local.clone();
+    let remote = tunnel_remote.clone();
     let ctx = state.clone();
     let mut finish1 = finish_receiver.clone();
     let finish1 = finish1.changed();
     let finish1 = Box::pin(finish1);
     let finish2 = finish_receiver.changed();
     let finish2 = Box::pin(finish2);
-    let update_sent = move |bytes| ctx.update_transferred(&local, true, bytes, client_addr);
-    let update_recieved =
-        move |bytes| state.update_transferred(&tunnel_local, false, bytes, client_addr);
+    let update_sent =
+        move |bytes| ctx.update_transferred(&local, &remote, true, bytes, client_addr);
+    let update_recieved = move |bytes| {
+        state.update_transferred(&tunnel_local, &tunnel_remote, false, bytes, client_addr)
+    };
     CopyBidirectional {
         a,
         b,

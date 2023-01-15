@@ -49,11 +49,12 @@ async fn process_socket(
                 {
                     Ok(Ok(mut stream)) => {
                         state.remote_connected(&tunnel_key, &remote, &local_client);
-                        last_remote = Some(remote);
+                        last_remote = Some(remote.clone());
                         match copy_bidirectional(
                             &mut socket,
                             &mut stream,
                             tunnel_key.clone(),
+                            remote,
                             local_client,
                             state.clone(),
                             finish_receiver,
