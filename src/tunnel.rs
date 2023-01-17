@@ -60,9 +60,22 @@ impl Display for SocketSpec {
 }
 
 #[derive(Debug, Clone)]
+pub enum TunnelLBStrategy {
+    Random,
+    RoundRobin,
+}
+
+impl Default for TunnelLBStrategy {
+    fn default() -> Self {
+        return TunnelLBStrategy::Random;
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Tunnel {
     pub local: SocketSpec,
     pub remote: Vec<SocketSpec>,
+    pub lb_strategy: TunnelLBStrategy,
 }
 
 impl std::fmt::Display for Tunnel {
@@ -86,6 +99,7 @@ impl FromStr for Tunnel {
         let (local_part, remote_part) = s
             .split_once("=")
             .ok_or_else(|| Error::TunnelParseError(format!("Missing = in tunnel definition")))?;
+        //if remote_part.starts_with('pat')
         let remotes = remote_part.split(",");
         let remotes: Result<Vec<SocketSpec>> = remotes.map(|s| s.parse()).collect();
         let remotes = remotes?;
@@ -98,6 +112,7 @@ impl FromStr for Tunnel {
         Ok(Tunnel {
             local,
             remote: remotes,
+            lb_strategy: TunnelLBStrategy::default(),
         })
     }
 }

@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use parking_lot::RwLock;
-use rand::Rng;
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
 
@@ -11,6 +10,10 @@ use crate::{
     Tunnel,
 };
 
+use self::strategy::LBStrategy;
+
+pub mod strategy;
+
 #[derive(Debug, Default, Clone)]
 pub struct TunnelStats {
     pub bytes_sent: u64,
@@ -20,15 +23,26 @@ pub struct TunnelStats {
     pub errors: u64,
 }
 
+type RemotesMap = IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>;
+
 #[derive(Debug)]
 pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
-    pub remotes: IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>,
+    pub remotes: RemotesMap,
+    pub lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
+    last_selected_index: Option<usize>,
 }
 
 impl TunnelInfo {
-    pub fn new(close_channel: watch::Sender<bool>, remotes: Vec<SocketSpec>) -> Self {
+    pub fn new<S>(
+        close_channel: watch::Sender<bool>,
+        remotes: Vec<SocketSpec>,
+        lb_strategy: S,
+    ) -> Self
+    where
+        S: LBStrategy + Send + Sync + 'static,
+    {
         TunnelInfo {
             stats: TunnelStats::default(),
             close_channel,
@@ -36,21 +50,28 @@ impl TunnelInfo {
                 .into_iter()
                 .map(|k| (k, RemoteInfo::default()))
                 .collect(),
+            lb_strategy: Box::new(lb_strategy),
+            last_selected_index: None,
         }
     }
 }
 
 impl TunnelInfo {
-    pub fn select_remote(&self) -> Result<&SocketSpec> {
+    pub fn select_remote(&mut self) -> Result<SocketSpec> {
         let size = self.remotes.len();
-        if size == 0 {
+        let idx = if size == 0 {
             return Err(Error::NoRemote);
-        }
-        let idx: usize = rand::thread_rng().gen_range(0..size);
+        } else if size == 1 {
+            0
+        } else {
+            self.lb_strategy.select_remote(self)?
+        };
+        self.last_selected_index = Some(idx);
         self.remotes
             .get_index(idx)
             .map(|(k, _)| k)
             .ok_or_else(|| Error::NoRemote)
+            .cloned()
     }
 }
 
@@ -86,11 +107,12 @@ impl State {
     }
 
     pub fn select_remote(&self, tunnel_key: &SocketSpec) -> Result<SocketSpec> {
-        self.inner
+        let mut ti = self
+            .inner
             .tunnels
-            .get(tunnel_key)
-            .ok_or_else(|| Error::TunnelDoesNotExist)
-            .and_then(|info| info.select_remote().map(|socket| socket.clone()))
+            .get_mut(tunnel_key)
+            .ok_or_else(|| Error::TunnelDoesNotExist)?;
+        ti.select_remote()
     }
 
     pub(crate) fn add_tunnel(
@@ -101,7 +123,7 @@ impl State {
         if self.inner.tunnels.contains_key(&tunnel.local) {
             return Err(Error::TunnelExists);
         }
-        let info = TunnelInfo::new(close_channel, tunnel.remote);
+        let info = TunnelInfo::new(close_channel, tunnel.remote, strategy::Random);
         self.inner.tunnels.insert(tunnel.local, info);
         Ok(())
     }
