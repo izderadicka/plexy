@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
+mod parser;
+
 /// This is our equivalence to SocketAddr, but with host name
 /// As it is expected to move around thread frequently,
 /// host name is an immutable string in Arc,
@@ -99,7 +101,7 @@ impl FromStr for Tunnel {
         let (local_part, remote_part) = s
             .split_once("=")
             .ok_or_else(|| Error::TunnelParseError(format!("Missing = in tunnel definition")))?;
-        //if remote_part.starts_with('pat')
+
         let remotes = remote_part.split(",");
         let remotes: Result<Vec<SocketSpec>> = remotes.map(|s| s.parse()).collect();
         let remotes = remotes?;
