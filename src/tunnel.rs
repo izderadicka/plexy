@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
+use self::parser::tunnel;
+
 mod parser;
 
 /// This is our equivalence to SocketAddr, but with host name
@@ -98,24 +100,14 @@ impl FromStr for Tunnel {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let (local_part, remote_part) = s
-            .split_once("=")
-            .ok_or_else(|| Error::TunnelParseError(format!("Missing = in tunnel definition")))?;
-
-        let remotes = remote_part.split(",");
-        let remotes: Result<Vec<SocketSpec>> = remotes.map(|s| s.parse()).collect();
-        let remotes = remotes?;
-        if remotes.is_empty() {
-            return Err(Error::TunnelParseError(
-                "At least one remote address is needed".into(),
-            ));
-        }
-        let local: SocketSpec = local_part.parse()?;
-        Ok(Tunnel {
-            local,
-            remote: remotes,
-            lb_strategy: TunnelLBStrategy::default(),
-        })
+        tunnel(s)
+            .map_err(|e| match e {
+                nom::Err::Incomplete(_) => Error::TunnelParseError("Incomplete tunnel spec".into()),
+                nom::Err::Error(e) | nom::Err::Failure(e) => {
+                    Error::TunnelParseError(format!("Parser: {:?}, Unparsed: {}", e.code, e.input))
+                }
+            })
+            .map(|(_, t)| t)
     }
 }
 

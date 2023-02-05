@@ -1,15 +1,14 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while_m_n},
-    character::{
-        complete::{alpha1, alphanumeric1, char, u8},
-        is_alphanumeric, is_hex_digit,
-    },
-    combinator::{map, recognize, verify},
-    multi::{many0_count, separated_list1},
-    sequence::{delimited, pair, tuple},
+    character::complete::{alpha1, char, u8},
+    combinator::{all_consuming, map, recognize, verify},
+    multi::separated_list1,
+    sequence::{delimited, pair, separated_pair, tuple},
     IResult,
 };
+
+use crate::Tunnel;
 
 use super::SocketSpec;
 
@@ -51,6 +50,35 @@ fn socket_spec1(i: &str) -> IResult<&str, SocketSpec> {
         port,
         host: "127.0.0.1".into(),
     })(i)
+}
+
+fn socket_spec2(i: &str) -> IResult<&str, SocketSpec> {
+    map(
+        separated_pair(alt((host_name, ipv4, ipv6)), char(':'), port),
+        |(host, port)| SocketSpec {
+            host: host.into(),
+            port,
+        },
+    )(i)
+}
+
+fn socket_spec(i: &str) -> IResult<&str, SocketSpec> {
+    alt((socket_spec2, socket_spec1))(i)
+}
+
+pub(super) fn tunnel(i: &str) -> IResult<&str, Tunnel> {
+    all_consuming(map(
+        separated_pair(
+            socket_spec,
+            char('='),
+            separated_list1(char(','), socket_spec),
+        ),
+        |(local, remote)| Tunnel {
+            local,
+            remote,
+            lb_strategy: Default::default(),
+        },
+    ))(i)
 }
 
 #[cfg(test)]
@@ -116,5 +144,18 @@ mod tests {
         let z = "neplatne-";
         let res = host_name(z);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_socket_spec() {
+        let x = "localhost:3333";
+        let (_rest, s) = socket_spec(x).expect("valid socket address");
+        assert_eq!("localhost", s.host.as_ref());
+        assert_eq!(3333, s.port);
+
+        let y = "127.0.0.1:3000";
+        let (_rest, s) = socket_spec(y).expect("valid socket address");
+        assert_eq!("127.0.0.1", s.host.as_ref());
+        assert_eq!(3000, s.port);
     }
 }
