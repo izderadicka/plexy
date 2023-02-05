@@ -35,11 +35,11 @@ fn ipv6_segment(i: &str) -> IResult<&str, &str> {
 }
 
 fn ipv6(i: &str) -> IResult<&str, &str> {
-    recognize(delimited(
+    delimited(
         tag("["),
-        separated_list1(tag(":"), ipv6_segment),
+        recognize(separated_list1(tag(":"), ipv6_segment)),
         tag("]"),
-    ))(i)
+    )(i)
 }
 
 fn ipv4(i: &str) -> IResult<&str, &str> {
@@ -87,27 +87,28 @@ mod tests {
 
     #[test]
     fn test_ipv6() {
+        let s = |s: &'static str| &s[1..s.len() - 1];
         let ip1 = "[2001:db8:3333:4444:5555:6666:7777:8888]";
         let (_rest, res) = ipv6(ip1).expect("valid ipv6 addr");
-        assert_eq!(ip1, res);
+        assert_eq!(s(ip1), res);
         let ip2 = "[2001:db8:3333:4444:CCCC:DDDD:EEEE:FFFF]";
         let (_rest, res) = ipv6(ip2).expect("valid ipv6 addr");
-        assert_eq!(ip2, res);
+        assert_eq!(s(ip2), res);
         let ip3 = "[::]";
         let (_rest, res) = ipv6(ip3).expect("valid ipv6 addr");
-        assert_eq!(ip3, res);
+        assert_eq!(s(ip3), res);
 
         let ip4 = "[::1234:5678]";
         let (_rest, res) = ipv6(ip4).expect("valid ipv6 addr");
-        assert_eq!(ip4, res);
+        assert_eq!(s(ip4), res);
 
         let ip5 = "[2001:db8::]";
         let (_rest, res) = ipv6(ip5).expect("valid ipv6 addr");
-        assert_eq!(ip5, res);
+        assert_eq!(s(ip5), res);
 
         let ip6 = "[2001:db8::1234:5678]";
         let (_rest, res) = ipv6(ip6).expect("valid ipv6 addr");
-        assert_eq!(ip6, res);
+        assert_eq!(s(ip6), res);
     }
 
     #[test]
