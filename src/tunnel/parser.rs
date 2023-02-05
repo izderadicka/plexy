@@ -3,11 +3,11 @@ use nom::{
     bytes::complete::{tag, take_while, take_while_m_n},
     character::{
         complete::{alpha1, alphanumeric1, char, u8},
-        is_alphanumeric,
+        is_alphanumeric, is_hex_digit,
     },
     combinator::{map, recognize, verify},
-    multi::many0_count,
-    sequence::{pair, tuple},
+    multi::{many0_count, separated_list1},
+    sequence::{delimited, pair, tuple},
     IResult,
 };
 
@@ -31,8 +31,16 @@ fn host_name(i: &str) -> IResult<&str, &str> {
     })(i)
 }
 
+fn ipv6_segment(i: &str) -> IResult<&str, &str> {
+    take_while_m_n(0, 4, |c: char| c.is_ascii_hexdigit())(i)
+}
+
 fn ipv6(i: &str) -> IResult<&str, &str> {
-    todo!()
+    recognize(delimited(
+        tag("["),
+        separated_list1(tag(":"), ipv6_segment),
+        tag("]"),
+    ))(i)
 }
 
 fn ipv4(i: &str) -> IResult<&str, &str> {
@@ -48,6 +56,31 @@ fn socket_spec1(i: &str) -> IResult<&str, SocketSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ipv6() {
+        let ip1 = "[2001:db8:3333:4444:5555:6666:7777:8888]";
+        let (_rest, res) = ipv6(ip1).expect("valid ipv6 addr");
+        assert_eq!(ip1, res);
+        let ip2 = "[2001:db8:3333:4444:CCCC:DDDD:EEEE:FFFF]";
+        let (_rest, res) = ipv6(ip2).expect("valid ipv6 addr");
+        assert_eq!(ip2, res);
+        let ip3 = "[::]";
+        let (_rest, res) = ipv6(ip3).expect("valid ipv6 addr");
+        assert_eq!(ip3, res);
+
+        let ip4 = "[::1234:5678]";
+        let (_rest, res) = ipv6(ip4).expect("valid ipv6 addr");
+        assert_eq!(ip4, res);
+
+        let ip5 = "[2001:db8::]";
+        let (_rest, res) = ipv6(ip5).expect("valid ipv6 addr");
+        assert_eq!(ip5, res);
+
+        let ip6 = "[2001:db8::1234:5678]";
+        let (_rest, res) = ipv6(ip6).expect("valid ipv6 addr");
+        assert_eq!(ip6, res);
+    }
 
     #[test]
     fn test_ipv4() {

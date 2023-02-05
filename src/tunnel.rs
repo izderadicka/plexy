@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(3333, t.local.port());
         assert_eq!("0.0.0.0", t.local.host());
         assert_eq!(3000, t.remote[0].port());
-        assert_eq!("127.0.0.1", t.remote[1].host());
+        assert_eq!("127.0.0.1", t.remote[0].host());
     }
 
     #[test]
