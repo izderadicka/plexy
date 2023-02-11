@@ -18,8 +18,7 @@ impl codec::Decoder for CommandCodec {
         let res = self.lines_codec.decode(src)?;
         match res {
             Some(line) => {
-                let cmd: CommandRequest =
-                    line.parse().unwrap_or_else(|e| CommandRequest::Invalid(e));
+                let cmd: CommandRequest = line.parse().unwrap_or_else(CommandRequest::Invalid);
                 Ok(Some(cmd))
             }
             None => Ok(None),

@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
-use self::parser::tunnel;
+use self::parser::{socket_spec, tunnel};
 
 mod parser;
 
@@ -25,7 +25,7 @@ impl SocketSpec {
     }
 
     pub fn host(&self) -> &str {
-        &*self.host
+        &self.host
     }
 }
 
@@ -33,27 +33,26 @@ impl FromStr for SocketSpec {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let mut parts = s.splitn(2, ":");
-        match parts.next() {
-            Some(mut host) => {
-                let port = match parts.next() {
-                    Some(port) => port,
-                    None => {
-                        let h = host;
-                        host = "127.0.0.1";
-                        h
-                    }
-                };
-                let port: u16 = port
-                    .parse()
-                    .map_err(|_e| Error::SocketSpecParseError("Invalid port number".into()))?;
-                Ok(SocketSpec {
-                    host: host.into(),
-                    port,
-                })
-            }
-            None => return Err(Error::SocketSpecParseError("Empty".into())),
-        }
+        socket_spec(s)
+            .map_err(|e| match e {
+                nom::Err::Incomplete(_) => {
+                    Error::SocketSpecParseError("Incomplete Socket Spec".into())
+                }
+                nom::Err::Error(e) | nom::Err::Failure(e) => Error::SocketSpecParseError(format!(
+                    "Failed parser: {:?}, unparsed: {}",
+                    e.code, e.input
+                )),
+            })
+            .and_then(|(rest, spec)| {
+                if !rest.trim_end().is_empty() {
+                    Err(Error::SocketSpecParseError(format!(
+                        "Extra characters after spec: {}",
+                        rest
+                    )))
+                } else {
+                    Ok(spec)
+                }
+            })
     }
 }
 
@@ -71,8 +70,13 @@ pub enum TunnelLBStrategy {
 
 impl Default for TunnelLBStrategy {
     fn default() -> Self {
-        return TunnelLBStrategy::Random;
+        TunnelLBStrategy::Random
     }
+}
+
+#[derive(Debug)]
+pub struct TunnelOptions {
+    pub lb_strategy: Option<TunnelLBStrategy>,
 }
 
 #[derive(Debug, Clone)]

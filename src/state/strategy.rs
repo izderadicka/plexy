@@ -26,6 +26,6 @@ impl LBStrategy for RoundRobin {
     fn select_remote(&self, tunnel: &TunnelInfo) -> Result<usize> {
         let size = tunnel.remotes.len();
         let last = tunnel.last_selected_index.unwrap_or_default();
-        return Ok((last + 1) % size);
+        Ok((last + 1) % size)
     }
 }

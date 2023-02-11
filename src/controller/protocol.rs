@@ -48,7 +48,7 @@ impl FromStr for CommandRequest {
     type Err = Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let mut parts = s.splitn(2, " ");
+        let mut parts = s.splitn(2, ' ');
         let cmd = parts
             .next()
             .ok_or_else(|| Error::ControlProtocolError("No command".into()))?;
@@ -120,12 +120,12 @@ impl std::fmt::Display for CommandResponse {
             CommandResponse::Info { short, details } => {
                 write!(f, "OK: {}", short)?;
                 if let Some(lines) = details {
-                    writeln!(f, "")?;
+                    writeln!(f)?;
                     let length = lines.len();
-                    for (n, l) in lines.into_iter().enumerate() {
+                    for (n, l) in lines.iter().enumerate() {
                         write!(f, "\t{}", l)?;
                         if n < length - 1 {
-                            writeln!(f, "")?;
+                            writeln!(f)?;
                         }
                     }
                 }
@@ -155,7 +155,7 @@ impl Command for CommandRequest {
             CommandRequest::Status(long) => {
                 if ctx.number_of_tunnels() == 0 {
                     CommandResponse::Info {
-                        short: format!("No tunnels"),
+                        short: "No tunnels".to_string(),
                         details: None,
                     }
                 } else {
@@ -213,7 +213,7 @@ impl Command for CommandRequest {
                     "EXIT",
                     "HELP",
                 ];
-                let help = help.into_iter().map(|s| s.to_string()).collect();
+                let help = help.iter().map(|s| s.to_string()).collect();
                 CommandResponse::Info {
                     short: "commands".into(),
                     details: Some(help),

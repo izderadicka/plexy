@@ -62,7 +62,7 @@ fn socket_spec2(i: &str) -> IResult<&str, SocketSpec> {
     )(i)
 }
 
-fn socket_spec(i: &str) -> IResult<&str, SocketSpec> {
+pub(super) fn socket_spec(i: &str) -> IResult<&str, SocketSpec> {
     alt((socket_spec2, socket_spec1))(i)
 }
 

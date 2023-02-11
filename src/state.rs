@@ -70,7 +70,7 @@ impl TunnelInfo {
         self.remotes
             .get_index(idx)
             .map(|(k, _)| k)
-            .ok_or_else(|| Error::NoRemote)
+            .ok_or(Error::NoRemote)
             .cloned()
     }
 }
@@ -111,7 +111,7 @@ impl State {
             .inner
             .tunnels
             .get_mut(tunnel_key)
-            .ok_or_else(|| Error::TunnelDoesNotExist)?;
+            .ok_or(Error::TunnelDoesNotExist)?;
         ti.select_remote()
     }
 
@@ -133,7 +133,7 @@ impl State {
             .tunnels
             .remove(local)
             .map(|(_, t)| t)
-            .ok_or_else(|| Error::TunnelDoesNotExist)
+            .ok_or(Error::TunnelDoesNotExist)
     }
 
     pub fn number_of_tunnels(&self) -> usize {
