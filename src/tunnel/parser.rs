@@ -1,8 +1,8 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while_m_n},
+    bytes::complete::{tag, take_till, take_while, take_while_m_n},
     character::complete::{alpha1, char, u8},
-    combinator::{all_consuming, map, recognize, verify},
+    combinator::{all_consuming, map, opt, recognize, verify},
     multi::separated_list1,
     sequence::{delimited, pair, separated_pair, tuple},
     IResult,
@@ -10,7 +10,7 @@ use nom::{
 
 use crate::Tunnel;
 
-use super::SocketSpec;
+use super::{SocketSpec, TunnelOptions};
 
 fn port(i: &str) -> IResult<&str, u16> {
     nom::character::complete::u16(i)
@@ -18,6 +18,10 @@ fn port(i: &str) -> IResult<&str, u16> {
 
 fn is_other_hostname_char(c: char) -> bool {
     ".-".contains(c)
+}
+
+fn is_option_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || '_' == c
 }
 
 fn host_name(i: &str) -> IResult<&str, &str> {
@@ -66,23 +70,57 @@ pub(super) fn socket_spec(i: &str) -> IResult<&str, SocketSpec> {
     alt((socket_spec2, socket_spec1))(i)
 }
 
+fn options(i: &str) -> IResult<&str, TunnelOptions> {
+    fn err(input: &str) -> nom::Err<nom::error::Error<&str>> {
+        nom::Err::Failure(nom::error::Error {
+            input,
+            code: nom::error::ErrorKind::Verify,
+        })
+    }
+    separated_list1(
+        char(','),
+        separated_pair(
+            take_while(is_option_name_char),
+            char('='),
+            take_till(|c| ",]".contains(c)),
+        ),
+    )(i)
+    .and_then(|(rest, items)| {
+        let mut options = TunnelOptions::default();
+        for (k, v) in items {
+            match k.to_lowercase().as_str() {
+                "strategy" => options.lb_strategy = v.parse().map_err(|_| err(v))?,
+                "retries" => options.remote_connect_retries = v.parse().map_err(|_| err(v))?,
+                "timeout" => options.remote_connect_timeout = v.parse().map_err(|_| err(v))?,
+                _ => return Err(err(k)),
+            }
+        }
+        Ok((rest, options))
+    })
+}
+
 pub(super) fn tunnel(i: &str) -> IResult<&str, Tunnel> {
     all_consuming(map(
         separated_pair(
             socket_spec,
             char('='),
-            separated_list1(char(','), socket_spec),
+            tuple((
+                separated_list1(char(','), socket_spec),
+                opt(delimited(char('['), options, char(']'))),
+            )),
         ),
-        |(local, remote)| Tunnel {
+        |(local, (remote, options))| Tunnel {
             local,
             remote,
-            lb_strategy: Default::default(),
+            options,
         },
     ))(i)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::state::strategy::TunnelLBStrategy;
+
     use super::*;
 
     #[test]
@@ -158,5 +196,17 @@ mod tests {
         let (_rest, s) = socket_spec(y).expect("valid socket address");
         assert_eq!("127.0.0.1", s.host.as_ref());
         assert_eq!(3000, s.port);
+    }
+
+    #[test]
+    fn test_options() {
+        let options_str = "strategy=random,retries=3,timeout=10.0";
+        let (_rest, res) = options(options_str).unwrap();
+        assert_eq!(3, res.remote_connect_retries);
+        assert!(matches!(
+            res.remote_connect_timeout.partial_cmp(&10.0).unwrap(),
+            std::cmp::Ordering::Equal
+        ));
+        assert!(matches!(res.lb_strategy, TunnelLBStrategy::Random));
     }
 }

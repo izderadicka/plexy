@@ -34,9 +34,8 @@ async fn process_socket(
 ) -> Result<()> {
     debug!("Client connected");
     state.client_connected(&tunnel_key, &local_client);
-    let conn_timeout = state.establish_remote_connection_timeout();
-    let mut retries = state.establish_remote_connection_retries();
     let mut last_remote = None;
+    let (mut retries, conn_timeout) = state.remote_limits(&tunnel_key)?;
     while retries > 0 {
         match state.select_remote(&tunnel_key) {
             Ok(remote) => {
@@ -123,7 +122,7 @@ async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
     let listener = TcpListener::bind(tunnel.local.as_tuple()).await?;
     let (sender, receiver) = watch::channel(false);
     let tunnel_key = tunnel.local.clone();
-    state.add_tunnel(tunnel.clone(), sender)?;
+    state.add_tunnel(tunnel, sender)?;
     Ok(TunnelHandler {
         state,
         tunnel_key,

@@ -18,6 +18,8 @@ pub enum Error {
     ControlProtocolError(String),
     #[error("No remote available")]
     NoRemote,
+    #[error("Invalid loadbalancing strategy string")]
+    InvalidLBStrategy,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

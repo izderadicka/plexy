@@ -1,4 +1,7 @@
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    state::strategy::TunnelLBStrategy,
+};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
 use self::parser::{socket_spec, tunnel};
@@ -58,32 +61,36 @@ impl FromStr for SocketSpec {
 
 impl Display for SocketSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.host, self.port)
+        if self.host.contains(':') {
+            write!(f, "[{}]:{}", self.host, self.port)
+        } else {
+            write!(f, "{}:{}", self.host, self.port)
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum TunnelLBStrategy {
-    Random,
-    RoundRobin,
-}
-
-impl Default for TunnelLBStrategy {
-    fn default() -> Self {
-        TunnelLBStrategy::Random
-    }
-}
-
-#[derive(Debug)]
 pub struct TunnelOptions {
-    pub lb_strategy: Option<TunnelLBStrategy>,
+    pub lb_strategy: TunnelLBStrategy,
+    pub remote_connect_retries: u16,
+    pub remote_connect_timeout: f32,
+}
+
+impl Default for TunnelOptions {
+    fn default() -> Self {
+        Self {
+            lb_strategy: Default::default(),
+            remote_connect_retries: 3,
+            remote_connect_timeout: 10.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Tunnel {
     pub local: SocketSpec,
     pub remote: Vec<SocketSpec>,
-    pub lb_strategy: TunnelLBStrategy,
+    pub options: Option<TunnelOptions>,
 }
 
 impl std::fmt::Display for Tunnel {
@@ -135,5 +142,12 @@ mod tests {
         assert_eq!("127.0.0.1", t.local.host());
         assert_eq!(3000, t.remote[0].port());
         assert_eq!("127.0.0.1", t.remote[0].host());
+    }
+
+    #[test]
+    fn test_tunnel_with_options() {
+        let t_str = "localhost:3000=host1:3001,host2:3002,host3:3003[strategy=round-robin,timeout=55.5,retries=5]";
+        let t: Tunnel = t_str.parse().expect("Valid tunnel spec");
+        assert_eq!(t.options.unwrap().remote_connect_retries, 5);
     }
 }

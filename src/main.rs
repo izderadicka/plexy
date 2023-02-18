@@ -17,8 +17,9 @@ async fn main() -> io::Result<()> {
     // launch tunnels
     if let Some(tunnels) = tunnels {
         for tunnel in tunnels {
-            if let Err(e) = start_tunnel(tunnel.clone(), state.clone()).await {
-                error!("Cannot start tunnel {:?}: {}", tunnel, e);
+            let local = tunnel.local.clone();
+            if let Err(e) = start_tunnel(tunnel, state.clone()).await {
+                error!("Cannot start tunnel on {:?}: {}", local, e);
             };
         }
     }

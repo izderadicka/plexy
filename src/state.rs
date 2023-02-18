@@ -6,7 +6,7 @@ use tokio::sync::watch;
 use crate::{
     config::Args,
     error::{Error, Result},
-    tunnel::SocketSpec,
+    tunnel::{SocketSpec, TunnelOptions},
     Tunnel,
 };
 
@@ -30,19 +30,18 @@ pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
     pub remotes: RemotesMap,
-    pub lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
+    pub options: TunnelOptions,
+    lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
     last_selected_index: Option<usize>,
 }
 
 impl TunnelInfo {
-    pub fn new<S>(
+    pub fn new(
         close_channel: watch::Sender<bool>,
         remotes: Vec<SocketSpec>,
-        lb_strategy: S,
-    ) -> Self
-    where
-        S: LBStrategy + Send + Sync + 'static,
-    {
+        options: TunnelOptions,
+    ) -> Self {
+        let lb_strategy = options.lb_strategy.create();
         TunnelInfo {
             stats: TunnelStats::default(),
             close_channel,
@@ -50,7 +49,8 @@ impl TunnelInfo {
                 .into_iter()
                 .map(|k| (k, RemoteInfo::default()))
                 .collect(),
-            lb_strategy: Box::new(lb_strategy),
+            lb_strategy,
+            options,
             last_selected_index: None,
         }
     }
@@ -115,6 +115,18 @@ impl State {
         ti.select_remote()
     }
 
+    pub fn remote_limits(&self, tunnel_key: &SocketSpec) -> Result<(u16, f32)> {
+        let ti = self
+            .inner
+            .tunnels
+            .get(tunnel_key)
+            .ok_or(Error::TunnelDoesNotExist)?;
+        Ok((
+            ti.options.remote_connect_retries,
+            ti.options.remote_connect_timeout,
+        ))
+    }
+
     pub(crate) fn add_tunnel(
         &self,
         tunnel: Tunnel,
@@ -123,7 +135,11 @@ impl State {
         if self.inner.tunnels.contains_key(&tunnel.local) {
             return Err(Error::TunnelExists);
         }
-        let info = TunnelInfo::new(close_channel, tunnel.remote, strategy::Random);
+        let info = TunnelInfo::new(
+            close_channel,
+            tunnel.remote,
+            tunnel.options.unwrap_or_default(),
+        );
         self.inner.tunnels.insert(tunnel.local, info);
         Ok(())
     }
