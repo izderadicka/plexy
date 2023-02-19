@@ -40,6 +40,9 @@ pub struct Args {
         help = "number of retries for establishing remote connection"
     )]
     pub establish_remote_connection_retries: u16,
+
+    #[arg(long, help = "detailed help on tunnel specification syntax")]
+    pub help_tunnel: bool,
 }
 
 impl Default for Args {
@@ -50,6 +53,7 @@ impl Default for Args {
             copy_buffer_size: 8192,
             establish_remote_connection_timeout: 10.0,
             establish_remote_connection_retries: 3,
+            help_tunnel: false,
         }
     }
 }
@@ -62,6 +66,38 @@ impl Args {
         } else {
             Ok(vec![])
         }
+    }
+
+    pub fn tunnel_help() {
+        println!("
+    Tunnel specification consists of three parts, local_socket, where program is listening,
+    list of remote_sockets, where connections are proxied and eventually options for this tunnel 
+    in square brackets, so it looks like:
+
+        local_socket=remote_socket[,remote_socket ...][\\[options\\]]
+
+    socket is specified either by port number only, then address part is automatically IPv4 local loop - 127.0.0.1,
+    or it's host IP address (IPv4 or IPv6) or host name (that resolves locally to IP address). 
+    You can have more then 1 remote socket addresses, in that case connections are load balanced between 
+    remote hosts.
+    
+    Options must be in [ ] at the end of tunnel specification and they are key value parts separated by comma,
+    like key1=value1,... Valid options are:
+    
+    # Load balancing strategy
+    strategy=[random|round-robin|minimum-open-connections]
+    # Timeout for remote connection - seconds, allows decimals
+    timeout=<seconds>
+    # Retries for remote connection before failing the connection
+    retries=<n>
+
+    Examples of tunnel specifications:
+        localhost:4444=some.remote.host.net:3333
+        0.0.0.0:4444=192.168.33.5:3333,192.168.34.23:3333[strategy=random]
+        3000=3001,3002,3003[strategy=min-open-connections]
+        [::1]:3000=[::1]:3001,[::1]:3002,[::1]:3003[strategy=round-robin,timeout=2]
+
+        ")
     }
 }
 

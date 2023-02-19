@@ -2,7 +2,7 @@
 name = "plexy"
 version = "0.3.1"
 authors = ["Ivan<ivan@zderadicka.eu>"]
-description = "Simple dynamic TCP proxy"
+description = "Simple dynamic TCP proxy, can load balance connections between many remote end points"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

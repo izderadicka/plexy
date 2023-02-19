@@ -13,6 +13,10 @@ async fn main() -> plexy::error::Result<()> {
     console_subscriber::init();
     //tracing_subscriber::fmt::init();
     let mut args = Args::parse();
+    if args.help_tunnel {
+        Args::tunnel_help();
+        return Ok(());
+    }
 
     set_default_tunnel_options(TunnelOptions {
         lb_strategy: Default::default(),
