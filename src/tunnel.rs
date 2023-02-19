@@ -76,13 +76,34 @@ pub struct TunnelOptions {
     pub remote_connect_timeout: f32,
 }
 
+static mut DEFAULT_TUNNEL_OPTIONS: TunnelOptions = TunnelOptions {
+    lb_strategy: TunnelLBStrategy::Random,
+    remote_connect_retries: 3,
+    remote_connect_timeout: 10.0,
+};
+
+/// Must be used only at very of program before anything else
+/// especially Tunnel and TunnelOptions usage
+/// otherwise is UB
+pub fn set_default_tunnel_options(options: TunnelOptions) {
+    unsafe {
+        DEFAULT_TUNNEL_OPTIONS = options;
+    }
+}
+
 impl Default for TunnelOptions {
     fn default() -> Self {
-        Self {
-            lb_strategy: Default::default(),
-            remote_connect_retries: 3,
-            remote_connect_timeout: 10.0,
-        }
+        unsafe { DEFAULT_TUNNEL_OPTIONS.clone() }
+    }
+}
+
+impl Display for TunnelOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "strategy={},retries={},timeout={}",
+            self.lb_strategy, self.remote_connect_retries, self.remote_connect_timeout
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 
 use rand::Rng;
 
@@ -10,6 +10,7 @@ use super::TunnelInfo;
 pub enum TunnelLBStrategy {
     Random,
     RoundRobin,
+    MinimumOpenConnections,
 }
 
 impl Default for TunnelLBStrategy {
@@ -23,6 +24,7 @@ impl TunnelLBStrategy {
         match self {
             TunnelLBStrategy::Random => Box::new(Random),
             TunnelLBStrategy::RoundRobin => Box::new(RoundRobin),
+            TunnelLBStrategy::MinimumOpenConnections => Box::new(MinimumOpenConnections),
         }
     }
 }
@@ -34,7 +36,23 @@ impl FromStr for TunnelLBStrategy {
         match s.to_ascii_lowercase().as_str() {
             "random" => Ok(TunnelLBStrategy::Random),
             "roundrobin" | "round-robin" | "round_robin" => Ok(TunnelLBStrategy::RoundRobin),
+            "minimum-open-connections"
+            | "minimum_open_connections"
+            | "minimumopenconnections"
+            | "min-open-connections"
+            | "min_open_connections"
+            | "minopenconnections" => Ok(TunnelLBStrategy::MinimumOpenConnections),
             _ => Err(Error::InvalidLBStrategy),
+        }
+    }
+}
+
+impl Display for TunnelLBStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TunnelLBStrategy::Random => write!(f, "random"),
+            TunnelLBStrategy::RoundRobin => write!(f, "round-robin"),
+            TunnelLBStrategy::MinimumOpenConnections => write!(f, "minimum-open-connections"),
         }
     }
 }
@@ -64,5 +82,30 @@ impl LBStrategy for RoundRobin {
             .last_selected_index
             .unwrap_or_else(|| tunnel.remotes.len().saturating_sub(1));
         Ok((last + 1) % size)
+    }
+}
+
+#[derive(Debug)]
+pub struct MinimumOpenConnections;
+
+impl LBStrategy for MinimumOpenConnections {
+    fn select_remote(&self, tunnel: &TunnelInfo) -> Result<usize> {
+        let mut min_idx = 0usize;
+        let mut min_val = usize::MAX;
+        for (idx, open_conns) in tunnel
+            .remotes
+            .iter()
+            .map(|(_, r)| r.streams_open)
+            .enumerate()
+        {
+            if open_conns == 0 {
+                return Ok(idx);
+            } else if open_conns < min_val {
+                min_idx = idx;
+                min_val = open_conns;
+            }
+        }
+
+        return Ok(min_idx);
     }
 }

@@ -1,7 +1,7 @@
+use crate::error::Result;
+use crate::Tunnel;
 use clap::Parser;
 use std::net::SocketAddr;
-
-use crate::Tunnel;
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about)]
@@ -16,9 +16,9 @@ pub struct Args {
 
     #[arg(
         num_args = 0..1024,
-        help = "initial tunnels as port=>remote_addr:port, or local_addr:port=>remote_addr:port - either as separate arguments or separated by comma"
+        help = "initial tunnels as tunnel specification like local_addr:port=remote_addr:port,other_address:other_port, use --help-tunnel for details"
     )]
-    pub tunnels: Option<Vec<Tunnel>>,
+    pub tunnels: Option<Vec<String>>,
 
     #[arg(
         long,
@@ -50,6 +50,17 @@ impl Default for Args {
             copy_buffer_size: 8192,
             establish_remote_connection_timeout: 10.0,
             establish_remote_connection_retries: 3,
+        }
+    }
+}
+
+impl Args {
+    pub fn take_tunnels(&mut self) -> Result<Vec<Tunnel>> {
+        let tunnels = self.tunnels.take();
+        if let Some(tunnels) = tunnels {
+            tunnels.into_iter().map(|s| s.parse()).collect()
+        } else {
+            Ok(vec![])
         }
     }
 }

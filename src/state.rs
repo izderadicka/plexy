@@ -249,6 +249,14 @@ impl State {
             .ok_or(Error::TunnelDoesNotExist)
     }
 
+    pub fn tunnel_options(&self, local: &SocketSpec) -> Result<TunnelOptions> {
+        self.inner
+            .tunnels
+            .get(local)
+            .map(|ti| ti.options.clone())
+            .ok_or(Error::TunnelDoesNotExist)
+    }
+
     pub fn copy_buffer_size(&self) -> usize {
         let config = self.inner.config.read();
         config.copy_buffer_size
