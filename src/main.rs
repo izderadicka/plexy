@@ -10,8 +10,8 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> plexy::error::Result<()> {
-    console_subscriber::init();
-    //tracing_subscriber::fmt::init();
+    //console_subscriber::init();
+    tracing_subscriber::fmt::init();
     let mut args = Args::parse();
     if args.help_tunnel {
         Args::tunnel_help();

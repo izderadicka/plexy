@@ -79,6 +79,7 @@ impl TunnelInfo {
 pub struct RemoteInfo {
     pub bytes_sent: u64,
     pub streams_open: usize,
+    pub streams_pending: usize,
     pub bytes_received: u64,
     pub total_connections: u64,
     pub last_error_time: Option<Instant>,
@@ -112,7 +113,11 @@ impl State {
             .tunnels
             .get_mut(tunnel_key)
             .ok_or(Error::TunnelDoesNotExist)?;
-        ti.select_remote()
+        let selected = ti.select_remote()?;
+        ti.remotes
+            .get_mut(&selected)
+            .map(|r| r.streams_pending += 1);
+        Ok(selected)
     }
 
     pub fn remote_limits(&self, tunnel_key: &SocketSpec) -> Result<(u16, f32)> {
@@ -173,6 +178,7 @@ impl State {
             if let Some(rec) = rec.remotes.get_mut(remote) {
                 rec.streams_open += 1;
                 rec.total_connections += 1;
+                rec.streams_pending -= 1;
                 rec.num_errors = 0;
             }
         };
@@ -185,6 +191,7 @@ impl State {
                 rec.total_errors += 1;
                 rec.num_errors += 1;
                 rec.last_error_time = Some(Instant::now());
+                rec.streams_pending -= 1;
             }
         }
     }
