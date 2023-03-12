@@ -1,6 +1,6 @@
 [package]
 name = "plexy"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Ivan<ivan@zderadicka.eu>"]
 description = "Simple dynamic TCP proxy, can load balance connections between many remote end points"
 edition = "2021"
