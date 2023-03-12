@@ -184,13 +184,18 @@ impl Command for CommandRequest {
                 }
             }
             CommandRequest::Detail(local) => match ctx.remotes(&local) {
-                Ok(remotes) => {
+                Ok((remotes, dead_remotes)) => {
                     let options = match ctx.tunnel_options(&local) {
                         Ok(o) => o,
                         Err(e) => return CommandResponse::Problem(Some(e)),
                     };
 
-                    let short = format!("Remotes: {}, Options: {}", remotes.len(), options);
+                    let short = format!(
+                        "Remotes: {}, Dead Remotes: {}, Options: {}",
+                        remotes.len(),
+                        dead_remotes,
+                        options
+                    );
                     let details = remotes.into_iter()
                         .map(|(remote, info)| format!(
                         "{} = open conns {}, total conns {}, bytes sent {}, received {}, recent errors {}, total errors {}",

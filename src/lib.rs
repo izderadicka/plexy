@@ -35,13 +35,13 @@ async fn process_socket(
     debug!("Client connected");
     state.client_connected(&tunnel_key, &local_client);
     let mut last_remote = None;
-    let (mut retries, conn_timeout) = state.remote_limits(&tunnel_key)?;
+    let mut retries = state.remote_retries(&tunnel_key)?;
     while retries > 0 {
         match state.select_remote(&tunnel_key) {
-            Ok(remote) => {
+            Ok((remote, options)) => {
                 debug!(remote=%remote, "Selected remote");
                 match timeout(
-                    Duration::from_secs_f32(conn_timeout),
+                    Duration::from_secs_f32(options.remote_connect_timeout),
                     TcpStream::connect(remote.as_tuple()),
                 )
                 .await
@@ -70,12 +70,12 @@ async fn process_socket(
                         break;
                     }
                     Ok(Err(e)) => {
-                        state.remote_error(&tunnel_key, &remote, &local_client);
+                        state.remote_error(&tunnel_key, &remote, &local_client, &options);
                         error!(error=%e, remote=%remote,
                             "Error while connecting to remote");
                     }
                     Err(_) => {
-                        state.remote_error(&tunnel_key, &remote, &local_client);
+                        state.remote_error(&tunnel_key, &remote, &local_client, &options);
                         error!( remote=%remote,
                             "Timeout while connecting to remote");
                     }

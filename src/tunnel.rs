@@ -70,16 +70,25 @@ impl Display for SocketSpec {
 }
 
 #[derive(Debug, Clone)]
+pub struct TunnelRemoteOptions {
+    pub remote_errors_till_dead: u64,
+    pub remote_connect_timeout: f32,
+}
+
+#[derive(Debug, Clone)]
 pub struct TunnelOptions {
     pub lb_strategy: TunnelLBStrategy,
     pub remote_connect_retries: u16,
-    pub remote_connect_timeout: f32,
+    pub options: TunnelRemoteOptions,
 }
 
 static mut DEFAULT_TUNNEL_OPTIONS: TunnelOptions = TunnelOptions {
     lb_strategy: TunnelLBStrategy::Random,
     remote_connect_retries: 3,
-    remote_connect_timeout: 10.0,
+    options: TunnelRemoteOptions {
+        remote_errors_till_dead: 1,
+        remote_connect_timeout: 10.0,
+    },
 };
 
 /// Must be used only at very of program before anything else
@@ -101,8 +110,11 @@ impl Display for TunnelOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "strategy={},retries={},timeout={}",
-            self.lb_strategy, self.remote_connect_retries, self.remote_connect_timeout
+            "strategy={},retries={},timeout={}, errors={}",
+            self.lb_strategy,
+            self.remote_connect_retries,
+            self.options.remote_connect_timeout,
+            self.options.remote_errors_till_dead
         )
     }
 }

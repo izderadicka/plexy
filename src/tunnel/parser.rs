@@ -91,7 +91,9 @@ fn options(i: &str) -> IResult<&str, TunnelOptions> {
             match k.to_lowercase().as_str() {
                 "strategy" => options.lb_strategy = v.parse().map_err(|_| err(v))?,
                 "retries" => options.remote_connect_retries = v.parse().map_err(|_| err(v))?,
-                "timeout" => options.remote_connect_timeout = v.parse().map_err(|_| err(v))?,
+                "timeout" => {
+                    options.options.remote_connect_timeout = v.parse().map_err(|_| err(v))?
+                }
                 _ => return Err(err(k)),
             }
         }
@@ -204,7 +206,10 @@ mod tests {
         let (_rest, res) = options(options_str).unwrap();
         assert_eq!(3, res.remote_connect_retries);
         assert!(matches!(
-            res.remote_connect_timeout.partial_cmp(&10.0).unwrap(),
+            res.options
+                .remote_connect_timeout
+                .partial_cmp(&10.0)
+                .unwrap(),
             std::cmp::Ordering::Equal
         ));
         assert!(matches!(res.lb_strategy, TunnelLBStrategy::Random));

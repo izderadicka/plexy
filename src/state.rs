@@ -1,12 +1,16 @@
 use indexmap::IndexMap;
 use parking_lot::RwLock;
-use std::{net::SocketAddr, sync::Arc, time::Instant};
-use tokio::sync::watch;
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{net::TcpStream, sync::watch, time};
 
 use crate::{
     config::Args,
     error::{Error, Result},
-    tunnel::{SocketSpec, TunnelOptions},
+    tunnel::{SocketSpec, TunnelOptions, TunnelRemoteOptions},
     Tunnel,
 };
 
@@ -30,6 +34,7 @@ pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
     pub remotes: RemotesMap,
+    pub dead_remotes: RemotesMap,
     pub options: TunnelOptions,
     lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
     last_selected_index: Option<usize>,
@@ -49,6 +54,7 @@ impl TunnelInfo {
                 .into_iter()
                 .map(|k| (k, RemoteInfo::default()))
                 .collect(),
+            dead_remotes: IndexMap::with_hasher(fxhash::FxBuildHasher::default()),
             lb_strategy,
             options,
             last_selected_index: None,
@@ -107,29 +113,32 @@ impl State {
         }
     }
 
-    pub fn select_remote(&self, tunnel_key: &SocketSpec) -> Result<SocketSpec> {
+    pub fn select_remote(
+        &self,
+        tunnel_key: &SocketSpec,
+    ) -> Result<(SocketSpec, TunnelRemoteOptions)> {
         let mut ti = self
             .inner
             .tunnels
             .get_mut(tunnel_key)
             .ok_or(Error::TunnelDoesNotExist)?;
         let selected = ti.select_remote()?;
-        ti.remotes
+        let remote = ti
+            .remotes
             .get_mut(&selected)
-            .map(|r| r.streams_pending += 1);
-        Ok(selected)
+            .ok_or_else(|| Error::NoRemote)?;
+
+        remote.streams_pending += 1;
+        Ok((selected, ti.options.options.clone()))
     }
 
-    pub fn remote_limits(&self, tunnel_key: &SocketSpec) -> Result<(u16, f32)> {
+    pub fn remote_retries(&self, tunnel_key: &SocketSpec) -> Result<u16> {
         let ti = self
             .inner
             .tunnels
             .get(tunnel_key)
             .ok_or(Error::TunnelDoesNotExist)?;
-        Ok((
-            ti.options.remote_connect_retries,
-            ti.options.remote_connect_timeout,
-        ))
+        Ok(ti.options.remote_connect_retries)
     }
 
     pub(crate) fn add_tunnel(
@@ -184,16 +193,78 @@ impl State {
         };
     }
 
-    pub fn remote_error(&self, local: &SocketSpec, remote: &SocketSpec, _client_addr: &SocketAddr) {
-        if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
-            rec.stats.errors += 1;
-            if let Some(rec) = rec.remotes.get_mut(remote) {
-                rec.total_errors += 1;
-                rec.num_errors += 1;
-                rec.last_error_time = Some(Instant::now());
-                rec.streams_pending -= 1;
+    pub fn remote_error(
+        &self,
+        local: &SocketSpec,
+        remote: &SocketSpec,
+        _client_addr: &SocketAddr,
+        options: &TunnelRemoteOptions,
+    ) {
+        if let Some(mut tunnel) = self.inner.tunnels.get_mut(local) {
+            tunnel.stats.errors += 1;
+            let mut is_dead = false;
+            if let Some(remote_info) = tunnel.remotes.get_mut(remote) {
+                remote_info.total_errors += 1;
+                remote_info.num_errors += 1;
+                remote_info.last_error_time = Some(Instant::now());
+                remote_info.streams_pending -= 1;
+                is_dead = remote_info.num_errors >= options.remote_errors_till_dead;
+            }
+
+            if is_dead {
+                if let Some(rec) = tunnel.remotes.remove(remote) {
+                    tunnel.dead_remotes.insert(remote.clone(), rec);
+                    self.check_dead(
+                        local.clone(),
+                        remote.clone(),
+                        Duration::from_secs_f32(options.remote_connect_timeout),
+                        Duration::from_secs_f32(10.0),
+                    ); //TODO: from options
+                }
             }
         }
+    }
+
+    fn check_dead(
+        &self,
+        local: SocketSpec,
+        remote: SocketSpec,
+        timeout: Duration,
+        after: Duration,
+    ) {
+        // spawn task after given duration
+        // check that can connect to remote, which should be in dead remotes
+        // if OK move Remote info to active remotes and reset error count
+        // if not cannot connect just increase error count and timestamp and reschedule check_dead
+        let remote = remote.clone();
+        let state = self.clone();
+        let local = local.clone();
+        let f = async move {
+            time::sleep(after).await;
+
+            match time::timeout(timeout, TcpStream::connect(remote.as_tuple())).await {
+                Ok(Ok(_conn)) => {
+                    if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
+                        if let Some(mut rec) = tunnel.dead_remotes.remove(&remote) {
+                            rec.num_errors = 0;
+                            tunnel.remotes.insert(remote, rec);
+                        }
+                    }
+                }
+                Ok(Err(_)) | Err(_) => {
+                    if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
+                        if let Some(mut remote_info) = tunnel.dead_remotes.get_mut(&remote) {
+                            remote_info.total_errors += 1;
+                            remote_info.num_errors += 1;
+                            remote_info.last_error_time = Some(Instant::now());
+
+                            state.check_dead(local, remote, timeout, after);
+                        }
+                    }
+                }
+            }
+        };
+        tokio::spawn(f);
     }
 
     pub fn update_transferred(
@@ -243,15 +314,18 @@ impl State {
             .collect()
     }
 
-    pub fn remotes(&self, local: &SocketSpec) -> Result<Vec<(SocketSpec, RemoteInfo)>> {
+    pub fn remotes(&self, local: &SocketSpec) -> Result<(Vec<(SocketSpec, RemoteInfo)>, usize)> {
         self.inner
             .tunnels
             .get(local)
             .map(|t| {
-                t.remotes
-                    .iter()
-                    .map(|r| (r.0.clone(), r.1.clone()))
-                    .collect()
+                (
+                    t.remotes
+                        .iter()
+                        .map(|r| (r.0.clone(), r.1.clone()))
+                        .collect(),
+                    t.dead_remotes.len(),
+                )
             })
             .ok_or(Error::TunnelDoesNotExist)
     }
