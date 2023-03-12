@@ -24,7 +24,7 @@ pub mod error;
 mod state;
 pub mod tunnel;
 
-#[instrument(skip_all, fields(client=%local_client))]
+#[instrument(skip_all, fields(client=%local_client, tunnel=%tunnel_key))]
 async fn process_socket(
     mut socket: TcpStream,
     local_client: SocketAddr,
@@ -41,7 +41,7 @@ async fn process_socket(
             Ok((remote, options)) => {
                 debug!(remote=%remote, "Selected remote");
                 match timeout(
-                    Duration::from_secs_f32(options.remote_connect_timeout),
+                    Duration::from_secs_f32(options.connect_timeout),
                     TcpStream::connect(remote.as_tuple()),
                 )
                 .await

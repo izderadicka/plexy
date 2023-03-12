@@ -71,8 +71,9 @@ impl Display for SocketSpec {
 
 #[derive(Debug, Clone)]
 pub struct TunnelRemoteOptions {
-    pub remote_errors_till_dead: u64,
-    pub remote_connect_timeout: f32,
+    pub errors_till_dead: u64,
+    pub connect_timeout: f32,
+    pub dead_retry: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -86,8 +87,9 @@ static mut DEFAULT_TUNNEL_OPTIONS: TunnelOptions = TunnelOptions {
     lb_strategy: TunnelLBStrategy::Random,
     remote_connect_retries: 3,
     options: TunnelRemoteOptions {
-        remote_errors_till_dead: 1,
-        remote_connect_timeout: 10.0,
+        errors_till_dead: 1,
+        connect_timeout: 10.0,
+        dead_retry: 10.0,
     },
 };
 
@@ -113,8 +115,8 @@ impl Display for TunnelOptions {
             "strategy={},retries={},timeout={}, errors={}",
             self.lb_strategy,
             self.remote_connect_retries,
-            self.options.remote_connect_timeout,
-            self.options.remote_errors_till_dead
+            self.options.connect_timeout,
+            self.options.errors_till_dead
         )
     }
 }

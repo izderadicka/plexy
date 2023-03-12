@@ -32,14 +32,28 @@ pub struct Args {
         default_value = "10",
         help = "timeout for establishing remote connection is seconds (decimals allowed)"
     )]
-    pub establish_remote_connection_timeout: f32,
+    pub remote_timeout: f32,
 
     #[arg(
         long,
         default_value = "3",
         help = "number of retries for establishing remote connection"
     )]
-    pub establish_remote_connection_retries: u16,
+    pub remote_retries: u16,
+
+    #[arg(
+        long,
+        default_value = "1",
+        help = "number of errors on remote connection before it's considered dead"
+    )]
+    pub remote_errors: u64,
+
+    #[arg(
+        long,
+        default_value = "10.0",
+        help = "interval for checking dead remote connections for liveness"
+    )]
+    pub remote_dead_check_interval: f32,
 
     #[arg(long, help = "detailed help on tunnel specification syntax")]
     pub help_tunnel: bool,
@@ -51,8 +65,10 @@ impl Default for Args {
             control_socket: "127.0.0.1:9999".parse().unwrap(),
             tunnels: None,
             copy_buffer_size: 8192,
-            establish_remote_connection_timeout: 10.0,
-            establish_remote_connection_retries: 3,
+            remote_timeout: 10.0,
+            remote_retries: 3,
+            remote_errors: 1,
+            remote_dead_check_interval: 10.0,
             help_tunnel: false,
         }
     }

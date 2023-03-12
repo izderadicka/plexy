@@ -5,7 +5,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{net::TcpStream, sync::watch, time};
+use tokio::{net::TcpStream, sync::watch, task::JoinHandle, time};
+use tracing::{debug, instrument};
 
 use crate::{
     config::Args,
@@ -28,13 +29,14 @@ pub struct TunnelStats {
 }
 
 type RemotesMap = IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>;
+type DeadRemotesMap = IndexMap<SocketSpec, DeadRemote, fxhash::FxBuildHasher>;
 
 #[derive(Debug)]
 pub struct TunnelInfo {
     pub stats: TunnelStats,
     pub close_channel: watch::Sender<bool>,
     pub remotes: RemotesMap,
-    pub dead_remotes: RemotesMap,
+    pub dead_remotes: DeadRemotesMap,
     pub options: TunnelOptions,
     lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
     last_selected_index: Option<usize>,
@@ -91,6 +93,12 @@ pub struct RemoteInfo {
     pub last_error_time: Option<Instant>,
     pub num_errors: u64,
     pub total_errors: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct DeadRemote {
+    pub remote: RemoteInfo,
+    pub join_handle: Option<JoinHandle<()>>,
 }
 
 struct StateInner {
@@ -162,7 +170,14 @@ impl State {
         self.inner
             .tunnels
             .remove(local)
-            .map(|(_, t)| t)
+            .map(|(_, mut t)| {
+                t.dead_remotes.iter_mut().for_each(|(_, dead)| {
+                    if let Some(handle) = dead.join_handle.take() {
+                        handle.abort()
+                    }
+                });
+                t
+            })
             .ok_or(Error::TunnelDoesNotExist)
     }
 
@@ -208,30 +223,38 @@ impl State {
                 remote_info.num_errors += 1;
                 remote_info.last_error_time = Some(Instant::now());
                 remote_info.streams_pending -= 1;
-                is_dead = remote_info.num_errors >= options.remote_errors_till_dead;
+                is_dead = remote_info.num_errors >= options.errors_till_dead;
             }
 
             if is_dead {
                 if let Some(rec) = tunnel.remotes.remove(remote) {
-                    tunnel.dead_remotes.insert(remote.clone(), rec);
-                    self.check_dead(
+                    let join_handle = self.check_dead(
                         local.clone(),
                         remote.clone(),
-                        Duration::from_secs_f32(options.remote_connect_timeout),
+                        Duration::from_secs_f32(options.connect_timeout),
                         Duration::from_secs_f32(10.0),
                     ); //TODO: from options
+                    tunnel.dead_remotes.insert(
+                        remote.clone(),
+                        DeadRemote {
+                            remote: rec,
+                            join_handle: Some(join_handle),
+                        },
+                    );
+                    debug!("Tunnel remote {} moved to dead remotes", remote);
                 }
             }
         }
     }
 
+    #[instrument(skip_all, fields(tunnel=%local, remote=%remote))]
     fn check_dead(
         &self,
         local: SocketSpec,
         remote: SocketSpec,
         timeout: Duration,
         after: Duration,
-    ) {
+    ) -> JoinHandle<()> {
         // spawn task after given duration
         // check that can connect to remote, which should be in dead remotes
         // if OK move Remote info to active remotes and reset error count
@@ -245,26 +268,38 @@ impl State {
             match time::timeout(timeout, TcpStream::connect(remote.as_tuple())).await {
                 Ok(Ok(_conn)) => {
                     if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
-                        if let Some(mut rec) = tunnel.dead_remotes.remove(&remote) {
+                        if let Some(DeadRemote {
+                            remote: mut rec, ..
+                        }) = tunnel.dead_remotes.remove(&remote)
+                        {
                             rec.num_errors = 0;
+                            debug!(
+                                "Tunnel remote {} is live again, removed from dead remotes",
+                                remote
+                            );
                             tunnel.remotes.insert(remote, rec);
                         }
                     }
                 }
                 Ok(Err(_)) | Err(_) => {
                     if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
-                        if let Some(mut remote_info) = tunnel.dead_remotes.get_mut(&remote) {
+                        if let Some(DeadRemote {
+                            remote: ref mut remote_info,
+                            ref mut join_handle,
+                        }) = tunnel.dead_remotes.get_mut(&remote)
+                        {
                             remote_info.total_errors += 1;
                             remote_info.num_errors += 1;
                             remote_info.last_error_time = Some(Instant::now());
 
-                            state.check_dead(local, remote, timeout, after);
+                            let new_handle = state.check_dead(local, remote, timeout, after);
+                            *join_handle = Some(new_handle);
                         }
                     }
                 }
             }
         };
-        tokio::spawn(f);
+        return tokio::spawn(f);
     }
 
     pub fn update_transferred(
@@ -344,10 +379,10 @@ impl State {
     }
 
     pub fn establish_remote_connection_timeout(&self) -> f32 {
-        self.inner.config.read().establish_remote_connection_timeout
+        self.inner.config.read().remote_timeout
     }
 
     pub fn establish_remote_connection_retries(&self) -> u16 {
-        self.inner.config.read().establish_remote_connection_retries
+        self.inner.config.read().remote_retries
     }
 }

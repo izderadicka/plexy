@@ -19,10 +19,11 @@ async fn main() -> plexy::error::Result<()> {
     }
     set_default_tunnel_options(TunnelOptions {
         lb_strategy: Default::default(),
-        remote_connect_retries: args.establish_remote_connection_retries,
+        remote_connect_retries: args.remote_retries,
         options: TunnelRemoteOptions {
-            remote_connect_timeout: args.establish_remote_connection_timeout,
-            remote_errors_till_dead: 1, // TODO: args
+            connect_timeout: args.remote_timeout,
+            errors_till_dead: args.remote_errors,
+            dead_retry: args.remote_dead_check_interval,
         },
     });
 
