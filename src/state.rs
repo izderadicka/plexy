@@ -181,6 +181,41 @@ impl State {
             .ok_or(Error::TunnelDoesNotExist)
     }
 
+    pub(crate) fn add_remote_to_tunnel(
+        &self,
+        tunnel: &SocketSpec,
+        remote: SocketSpec,
+    ) -> Result<()> {
+        let mut ti = self
+            .inner
+            .tunnels
+            .get_mut(tunnel)
+            .ok_or_else(|| Error::TunnelDoesNotExist)?;
+        if !ti.remotes.contains_key(&remote) && !ti.dead_remotes.contains_key(&remote) {
+            ti.remotes.insert(remote, RemoteInfo::default());
+            Ok(())
+        } else {
+            Err(Error::TunnelExists)
+        }
+    }
+
+    pub(crate) fn remove_remote_from_tunnel(
+        &self,
+        tunnel: &SocketSpec,
+        remote: &SocketSpec,
+    ) -> Result<RemoteInfo> {
+        let mut ti = self
+            .inner
+            .tunnels
+            .get_mut(tunnel)
+            .ok_or_else(|| Error::TunnelDoesNotExist)?;
+
+        ti.remotes
+            .remove(remote)
+            .or_else(|| ti.dead_remotes.remove(remote).map(|d| d.remote))
+            .ok_or_else(|| Error::RemoteDoesNotExist)
+    }
+
     pub fn number_of_tunnels(&self) -> usize {
         self.inner.tunnels.len()
     }

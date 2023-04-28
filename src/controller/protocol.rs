@@ -42,6 +42,8 @@ pub enum CommandRequest {
     Help,
     Exit,
     Invalid(Error),
+    Add(SocketSpec, SocketSpec),
+    Remove(SocketSpec, SocketSpec),
 }
 
 impl FromStr for CommandRequest {
@@ -57,6 +59,20 @@ impl FromStr for CommandRequest {
             parts
                 .next()
                 .ok_or_else(|| Error::ControlProtocolError("Missing argument".into()))
+        };
+        let mut two_sockets = || {
+            args().and_then(|s| {
+                let mut args = s.splitn(2, ' ');
+                let tunnel: SocketSpec = args
+                    .next()
+                    .ok_or_else(|| Error::ControlProtocolError("Missing tunnel socket spec".into()))
+                    .and_then(|s| s.parse())?;
+                let remote: SocketSpec = args
+                    .next()
+                    .ok_or_else(|| Error::ControlProtocolError("Missing remote socket spec".into()))
+                    .and_then(|s| s.parse())?;
+                Ok((tunnel, remote))
+            })
         };
         match cmd.as_str() {
             "STATUS" => {
@@ -85,6 +101,14 @@ impl FromStr for CommandRequest {
             "DETAIL" => {
                 let addr: SocketSpec = args()?.parse()?;
                 Ok(CommandRequest::Detail(addr))
+            }
+            "ADD" => {
+                let (tunnel, remote) = two_sockets()?;
+                Ok(CommandRequest::Add(tunnel, remote))
+            }
+            "REMOVE" => {
+                let (tunnel, remote) = two_sockets()?;
+                Ok(CommandRequest::Remove(tunnel, remote))
             }
             _ => Err(Error::ControlProtocolError(format!(
                 "Invalid command: {}",
@@ -217,7 +241,9 @@ impl Command for CommandRequest {
             CommandRequest::Help => {
                 let help = &[
                     "OPEN tunnel",
-                    "CLOSE socket_address",
+                    "CLOSE tunnel",
+                    "ADD socket_address",
+                    "REMOVE socket_address",
                     "STATUS [full|long]",
                     "DETAIL tunnel",
                     "EXIT",
@@ -228,6 +254,10 @@ impl Command for CommandRequest {
                     short: "commands".into(),
                     details: Some(help),
                 }
+            }
+            CommandRequest::Add(tunnel, remote) => ctx.add_remote_to_tunnel(&tunnel, remote).into(),
+            CommandRequest::Remove(tunnel, remote) => {
+                ctx.remove_remote_from_tunnel(&tunnel, &remote).into()
             }
         }
     }

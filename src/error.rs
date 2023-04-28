@@ -12,6 +12,8 @@ pub enum Error {
     TunnelExists,
     #[error("Tunnel doesn't exist")]
     TunnelDoesNotExist,
+    #[error("Remote does not exists")]
+    RemoteDoesNotExist,
     #[error("Invalid control protocol line: {0}")]
     ControlProtocolLineError(#[from] tokio_util::codec::LinesCodecError),
     #[error("Control protocol error: {0}")]
