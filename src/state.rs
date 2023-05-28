@@ -1,9 +1,10 @@
 use indexmap::IndexMap;
 use parking_lot::RwLock;
+use serde::{Serialize, Serializer};
 use std::{
     net::SocketAddr,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 use tokio::{net::TcpStream, sync::watch, task::JoinHandle, time};
 use tracing::{debug, instrument};
@@ -19,7 +20,7 @@ use self::strategy::LBStrategy;
 
 pub mod strategy;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct TunnelStats {
     pub bytes_sent: u64,
     pub streams_open: usize,
@@ -83,16 +84,35 @@ impl TunnelInfo {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct RemoteInfo {
     pub bytes_sent: u64,
     pub streams_open: usize,
     pub streams_pending: usize,
     pub bytes_received: u64,
     pub total_connections: u64,
-    pub last_error_time: Option<Instant>,
+    #[serde(serialize_with = "to_epoch_millis")]
+    pub last_error_time: Option<SystemTime>,
     pub num_errors: u64,
     pub total_errors: u64,
+}
+
+fn to_epoch_millis<S>(
+    time: &Option<SystemTime>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let ts = time.and_then(|t| {
+        t.duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .ok()
+    });
+    match ts {
+        Some(v) => serializer.serialize_some(&v),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -256,7 +276,7 @@ impl State {
             if let Some(remote_info) = tunnel.remotes.get_mut(remote) {
                 remote_info.total_errors += 1;
                 remote_info.num_errors += 1;
-                remote_info.last_error_time = Some(Instant::now());
+                remote_info.last_error_time = Some(SystemTime::now());
                 remote_info.streams_pending -= 1;
                 is_dead = remote_info.num_errors >= options.errors_till_dead;
             }
@@ -325,7 +345,7 @@ impl State {
                         {
                             remote_info.total_errors += 1;
                             remote_info.num_errors += 1;
-                            remote_info.last_error_time = Some(Instant::now());
+                            remote_info.last_error_time = Some(SystemTime::now());
 
                             let new_handle = state.check_dead(local, remote, timeout, after);
                             *join_handle = Some(new_handle);
@@ -382,6 +402,18 @@ impl State {
         let iter = self.inner.tunnels.iter();
         iter.map(|i| (i.key().clone(), i.value().stats.clone()))
             .collect()
+    }
+
+    pub fn info_to<T>(&self, tunnel: &SocketSpec) -> Result<T>
+    where
+        T: for<'a> From<&'a TunnelInfo> + 'static,
+    {
+        let ti = self
+            .inner
+            .tunnels
+            .get(tunnel)
+            .ok_or(Error::TunnelDoesNotExist)?;
+        Ok(ti.value().into())
     }
 
     pub fn remotes(&self, local: &SocketSpec) -> Result<(Vec<(SocketSpec, RemoteInfo)>, usize)> {

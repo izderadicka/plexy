@@ -9,10 +9,12 @@ pub struct Args {
     #[arg(
         short,
         long,
-        help = "socket address to listen for control commands",
-        default_value = "127.0.0.1:9999"
+        help = "socket address to listen for control commands over simple line base protocol"
     )]
-    pub control_socket: SocketAddr,
+    pub control_socket: Option<SocketAddr>,
+
+    #[arg(short, long, help = "socket address for JSON RPC control protocol")]
+    pub rpc_socket: Option<SocketAddr>,
 
     #[arg(
         num_args = 0..1024,
@@ -62,7 +64,8 @@ pub struct Args {
 impl Default for Args {
     fn default() -> Self {
         Args {
-            control_socket: "127.0.0.1:9999".parse().unwrap(),
+            control_socket: None,
+            rpc_socket: None,
             tunnels: None,
             copy_buffer_size: 8192,
             remote_timeout: 10.0,

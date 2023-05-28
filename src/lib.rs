@@ -21,6 +21,7 @@ mod aio;
 pub mod config;
 pub mod controller;
 pub mod error;
+pub mod rpc;
 mod state;
 pub mod tunnel;
 

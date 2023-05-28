@@ -22,6 +22,8 @@ pub enum Error {
     NoRemote,
     #[error("Invalid loadbalancing strategy string")]
     InvalidLBStrategy,
+    #[error("RPC error: {0}")]
+    RPCError(#[from] jsonrpsee::core::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

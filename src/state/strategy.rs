@@ -1,12 +1,13 @@
 use std::{fmt::Display, str::FromStr};
 
 use rand::Rng;
+use serde::Serialize;
 
 use crate::error::{Error, Result};
 
 use super::TunnelInfo;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum TunnelLBStrategy {
     Random,
     RoundRobin,

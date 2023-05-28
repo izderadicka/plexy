@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use crate::{
     error::{Error, Result},
     state::strategy::TunnelLBStrategy,
@@ -69,14 +71,14 @@ impl Display for SocketSpec {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TunnelRemoteOptions {
     pub errors_till_dead: u64,
     pub connect_timeout: f32,
     pub dead_retry: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TunnelOptions {
     pub lb_strategy: TunnelLBStrategy,
     pub remote_connect_retries: u16,
@@ -93,7 +95,7 @@ static mut DEFAULT_TUNNEL_OPTIONS: TunnelOptions = TunnelOptions {
     },
 };
 
-/// Must be used only at very of program before anything else
+/// Must be used only at very of beginning program before anything else
 /// especially Tunnel and TunnelOptions usage
 /// otherwise is UB
 pub fn set_default_tunnel_options(options: TunnelOptions) {
