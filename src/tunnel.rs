@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{Error, Result},
@@ -71,14 +71,14 @@ impl Display for SocketSpec {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelRemoteOptions {
     pub errors_till_dead: u64,
     pub connect_timeout: f32,
     pub dead_retry: f32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelOptions {
     pub lb_strategy: TunnelLBStrategy,
     pub remote_connect_retries: u16,

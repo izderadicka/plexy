@@ -5,9 +5,11 @@ use serde::Serialize;
 
 use crate::{
     error::Error,
+    start_tunnel,
     state::{RemoteInfo, TunnelInfo, TunnelStats},
+    stop_tunnel,
     tunnel::{SocketSpec, TunnelOptions},
-    State,
+    State, Tunnel,
 };
 
 type RPCResult<T> = Result<T, Error>;
@@ -45,6 +47,15 @@ trait Interface {
     fn tunnel_info(&self, tunnel_socket: String) -> RPCResult<RPCTunnelInfo>;
     #[method(name = "remotes")]
     fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteInfo>>;
+    #[method(name = "openTunnel")]
+    fn open_tunnel(
+        &self,
+        tunnel_socket: String,
+        remotes: Vec<String>,
+        options: Option<TunnelOptions>,
+    ) -> RPCResult<()>;
+    #[method(name = "closeTunnel")]
+    fn close_tunnel(&self, tunnel_socket: String) -> RPCResult<()>;
 }
 
 pub struct ControlRpc {
@@ -70,12 +81,36 @@ impl InterfaceServer for ControlRpc {
             .map(|(k, v)| Ok((k.to_string(), v)))
             .collect()
     }
+
+    fn open_tunnel(
+        &self,
+        tunnel_socket: String,
+        remotes: Vec<String>,
+        options: Option<TunnelOptions>,
+    ) -> RPCResult<()> {
+        let local = tunnel_socket.parse()?;
+        let remote = remotes
+            .into_iter()
+            .map(|s| s.parse())
+            .collect::<Result<Vec<_>, _>>()?;
+        let tunnel = Tunnel {
+            local,
+            options,
+            remote,
+        };
+        let _join_handle = start_tunnel(tunnel, self.state.clone());
+        Ok(())
+    }
+
+    fn close_tunnel(&self, tunnel_socket: String) -> RPCResult<()> {
+        let local = tunnel_socket.parse()?;
+        stop_tunnel(&local, self.state.clone())
+    }
 }
 
 pub async fn run_rpc_server(addr: SocketAddr, state: State) -> Result<(), Error> {
     let server = ServerBuilder::default().build(addr).await?;
     let rpc = ControlRpc { state };
     let handle = server.start(rpc.into_rpc())?;
-    handle.stopped().await;
-    Ok(())
+    Ok(handle.stopped().await)
 }

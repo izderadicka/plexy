@@ -1,4 +1,5 @@
 use clap::Parser;
+use futures::TryFutureExt;
 use plexy::{
     config::Args,
     controller::run_controller,
@@ -42,12 +43,18 @@ async fn main() -> plexy::error::Result<()> {
     info!(tunnels = ?tunnels, "Started plexy");
     if let Some(control_socket) = control_socket {
         info!("Control interface listening on {}", control_socket);
-        tokio::spawn(run_controller(control_socket, state.clone()));
+        tokio::spawn(
+            run_controller(control_socket, state.clone())
+                .map_err(|e| error!("Cannot start control interface: {}", e)),
+        );
     }
 
     if let Some(rpc_socket) = rpc_socket {
         info!("RPC interface listening on {}", rpc_socket);
-        tokio::spawn(run_rpc_server(rpc_socket, state.clone()));
+        tokio::spawn(
+            run_rpc_server(rpc_socket, state.clone())
+                .map_err(|e| error!("Cannot start RPC interface: {}", e)),
+        );
     }
     // launch tunnels
     for tunnel in tunnels {
