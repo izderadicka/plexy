@@ -27,5 +27,26 @@ pub enum Error {
     #[error("RPC error: {0}")]
     RPCError(#[from] jsonrpsee::core::Error),
 }
+const ERROR_BASE: i32 = 1000;
+
+impl Error {
+    pub fn code(&self) -> i32 {
+        match self {
+            Error::TunnelParseError(_) => ERROR_BASE + 1,
+            Error::SocketSpecParseError(_) => ERROR_BASE + 2,
+            Error::SocketAddrParse(_) => ERROR_BASE + 3,
+            Error::IOError(_) => ERROR_BASE + 4,
+            Error::TunnelExists => ERROR_BASE + 5,
+            Error::TunnelDoesNotExist => ERROR_BASE + 6,
+            Error::RemoteExists => ERROR_BASE + 7,
+            Error::RemoteDoesNotExist => ERROR_BASE + 8,
+            Error::ControlProtocolLineError(_) => ERROR_BASE + 9,
+            Error::ControlProtocolError(_) => ERROR_BASE + 10,
+            Error::NoRemote => ERROR_BASE + 11,
+            Error::InvalidLBStrategy => ERROR_BASE + 12,
+            Error::RPCError(_) => ERROR_BASE + 13,
+        }
+    }
+}
 
 pub type Result<T> = std::result::Result<T, Error>;

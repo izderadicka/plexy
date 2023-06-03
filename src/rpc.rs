@@ -17,7 +17,7 @@ type RPCResult<T> = Result<T, Error>;
 
 impl From<Error> for ErrorObject<'static> {
     fn from(value: Error) -> Self {
-        ErrorObject::owned::<()>(1, value.to_string(), None)
+        ErrorObject::owned::<()>(value.code(), value.to_string(), None)
     }
 }
 
