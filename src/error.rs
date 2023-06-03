@@ -12,6 +12,8 @@ pub enum Error {
     TunnelExists,
     #[error("Tunnel doesn't exist")]
     TunnelDoesNotExist,
+    #[error("Remote already exists")]
+    RemoteExists,
     #[error("Remote does not exists")]
     RemoteDoesNotExist,
     #[error("Invalid control protocol line: {0}")]

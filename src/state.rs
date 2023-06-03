@@ -215,7 +215,7 @@ impl State {
             ti.remotes.insert(remote, RemoteInfo::default());
             Ok(())
         } else {
-            Err(Error::TunnelExists)
+            Err(Error::RemoteExists)
         }
     }
 
@@ -236,8 +236,20 @@ impl State {
             .ok_or_else(|| Error::RemoteDoesNotExist)
     }
 
+    pub fn tunnel_exists(&self, tunnel: &SocketSpec) -> bool {
+        self.inner.tunnels.contains_key(tunnel)
+    }
+
     pub fn number_of_tunnels(&self) -> usize {
         self.inner.tunnels.len()
+    }
+
+    pub fn list_tunnels(&self) -> Vec<SocketSpec> {
+        self.inner
+            .tunnels
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     pub fn client_connected(&self, local: &SocketSpec, _client_addr: &SocketAddr) {

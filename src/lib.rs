@@ -120,6 +120,9 @@ pub async fn start_tunnel(tunnel: Tunnel, state: State) -> Result<JoinHandle<()>
 }
 
 async fn create_tunnel(tunnel: Tunnel, state: State) -> Result<TunnelHandler> {
+    if state.tunnel_exists(&tunnel.local) {
+        return Err(crate::error::Error::TunnelExists);
+    }
     let listener = TcpListener::bind(tunnel.local.as_tuple()).await?;
     let (sender, receiver) = watch::channel(false);
     let tunnel_key = tunnel.local.clone();

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr};
 
+use async_trait::async_trait;
 use jsonrpsee::{proc_macros::rpc, server::ServerBuilder, types::ErrorObject};
 use serde::Serialize;
 
@@ -43,12 +44,14 @@ impl From<&TunnelInfo> for RPCTunnelInfo {
 trait Interface {
     #[method(name = "numberOfTunnels")]
     fn number_of_tunnels(&self) -> usize;
+    #[method(name = "listTunnels")]
+    fn list_tunnels(&self) -> Vec<String>;
     #[method(name = "tunnelInfo")]
     fn tunnel_info(&self, tunnel_socket: String) -> RPCResult<RPCTunnelInfo>;
     #[method(name = "remotes")]
     fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteInfo>>;
     #[method(name = "openTunnel")]
-    fn open_tunnel(
+    async fn open_tunnel(
         &self,
         tunnel_socket: String,
         remotes: Vec<String>,
@@ -56,12 +59,17 @@ trait Interface {
     ) -> RPCResult<()>;
     #[method(name = "closeTunnel")]
     fn close_tunnel(&self, tunnel_socket: String) -> RPCResult<()>;
+    #[method(name = "addRemote")]
+    fn add_remote(&self, tunnel: String, remote: String) -> RPCResult<()>;
+    #[method(name = "removeRemote")]
+    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteInfo>;
 }
 
 pub struct ControlRpc {
     state: State,
 }
 
+#[async_trait]
 impl InterfaceServer for ControlRpc {
     fn number_of_tunnels(&self) -> usize {
         return self.state.number_of_tunnels();
@@ -82,7 +90,7 @@ impl InterfaceServer for ControlRpc {
             .collect()
     }
 
-    fn open_tunnel(
+    async fn open_tunnel(
         &self,
         tunnel_socket: String,
         remotes: Vec<String>,
@@ -98,13 +106,32 @@ impl InterfaceServer for ControlRpc {
             options,
             remote,
         };
-        let _join_handle = start_tunnel(tunnel, self.state.clone());
+        start_tunnel(tunnel, self.state.clone()).await?;
         Ok(())
     }
 
     fn close_tunnel(&self, tunnel_socket: String) -> RPCResult<()> {
         let local = tunnel_socket.parse()?;
         stop_tunnel(&local, self.state.clone())
+    }
+
+    fn list_tunnels(&self) -> Vec<String> {
+        self.state
+            .list_tunnels()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn add_remote(&self, tunnel: String, remote: String) -> RPCResult<()> {
+        let local = tunnel.parse()?;
+        let remote = remote.parse()?;
+        self.state.add_remote_to_tunnel(&local, remote)
+    }
+    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteInfo> {
+        let local = tunnel.parse()?;
+        let remote = remote.parse()?;
+        self.state.remove_remote_from_tunnel(&local, &remote)
     }
 }
 

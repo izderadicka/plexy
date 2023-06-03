@@ -79,6 +79,7 @@ pub struct TunnelRemoteOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TunnelOptions {
     pub lb_strategy: TunnelLBStrategy,
     pub remote_connect_retries: u16,
