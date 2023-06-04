@@ -1,9 +1,19 @@
-use std::net::SocketAddr;
+use std::{
+    fs::File,
+    io::{self, BufReader},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use clap::Parser;
 use futures::{StreamExt, TryFutureExt};
 use plexy::tunnel::SocketSpec;
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{
+    rustls::{Certificate, PrivateKey},
+    TlsAcceptor,
+};
 use tokio_util::codec;
 use tracing::{debug, error, info};
 
@@ -14,6 +24,32 @@ struct Args {
 
     #[arg(long, help = "use HTTP protocol (simple)")]
     http: bool,
+
+    #[arg(
+        long,
+        requires = "tls_cert",
+        help = "TLS key - PEM encoded, without password, forces TLS socket"
+    )]
+    tls_key: Option<PathBuf>,
+
+    #[arg(
+        long,
+        requires = "tls_key",
+        help = "TLS cert - PEM encoded, forces TLS socket"
+    )]
+    tls_cert: Option<PathBuf>,
+}
+
+fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
+    rustls_pemfile::certs(&mut BufReader::new(File::open(path)?))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
+        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+}
+
+fn load_keys(path: &Path) -> io::Result<Vec<PrivateKey>> {
+    rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(File::open(path)?))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))
+        .map(|mut keys| keys.drain(..).map(PrivateKey).collect())
 }
 
 async fn respond(socket: TcpStream, client_addr: SocketAddr, my_addr: SocketSpec) {
@@ -38,16 +74,55 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     for addr in args.addr {
         let addr2 = addr.clone();
+
+        let tls_acceptor = if let (Some(key_path), Some(cert_path)) =
+            (args.tls_key.as_ref(), args.tls_cert.as_ref())
+        {
+            let certs = load_certs(cert_path)?;
+            let mut keys = load_keys(key_path)?;
+            debug!("Loaded {} keys and {} certs", keys.len(), certs.len());
+            let config = rustls::ServerConfig::builder()
+                .with_safe_defaults()
+                .with_no_client_auth()
+                .with_single_cert(certs, keys.remove(0))
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+            let acceptor = TlsAcceptor::from(Arc::new(config));
+            Some(acceptor)
+        } else {
+            None
+        };
+
         tokio::spawn(
             async move {
                 let listener = TcpListener::bind(addr.as_tuple()).await?;
                 info!(address=%addr, "Started responder");
                 while let Ok((socket, client_addr)) = listener.accept().await {
-                    if args.http {
-                        tokio::spawn(simple_http::respond_http(socket, client_addr, addr.clone()));
-                    } else {
-                        tokio::spawn(respond(socket, client_addr, addr.clone()));
-                    }
+                    let acceptor = tls_acceptor.clone();
+                    let addr = addr.clone();
+                    tokio::spawn(async move {
+                        if let Some(acceptor) = acceptor {
+                            let tls_socket = acceptor
+                                .accept(socket)
+                                .await
+                                .map_err(|e| error!(error=%e, "TLS socket error"))?;
+
+                            if args.http {
+                                simple_http::respond_http(tls_socket, client_addr, addr.clone())
+                                    .await;
+                            } else {
+                                todo!();
+                                // tokio::spawn(respond(socket, client_addr, addr.clone()));
+                            }
+                        } else {
+                            if args.http {
+                                simple_http::respond_http(socket, client_addr, addr.clone()).await;
+                            } else {
+                                respond(socket, client_addr, addr.clone()).await;
+                            }
+                        }
+
+                        Ok::<_, ()>(())
+                    });
                 }
                 Ok::<_, anyhow::Error>(())
             }
@@ -59,6 +134,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+//async fn run_request
+
 mod simple_http {
     use std::{fmt, io, net::SocketAddr};
 
@@ -66,13 +143,16 @@ mod simple_http {
     use futures::{SinkExt, StreamExt};
     use http::{HeaderValue, Request, Response};
     use plexy::tunnel::SocketSpec;
-    use tokio::net::TcpStream;
+    use tokio::io::{AsyncRead, AsyncWrite};
     use tokio_util::codec::{Decoder, Encoder, Framed};
     use tracing::{debug, error};
 
     pub struct Http;
 
-    pub async fn respond_http(socket: TcpStream, client_addr: SocketAddr, my_addr: SocketSpec) {
+    pub async fn respond_http<T>(socket: T, client_addr: SocketAddr, my_addr: SocketSpec)
+    where
+        T: AsyncRead + AsyncWrite + Unpin,
+    {
         debug!(client = %client_addr, "Client connected");
         let mut transport = Framed::new(socket, Http);
 
