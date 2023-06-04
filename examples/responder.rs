@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use futures::{StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use plexy::tunnel::SocketSpec;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{
@@ -99,30 +99,42 @@ async fn main() -> anyhow::Result<()> {
                 while let Ok((socket, client_addr)) = listener.accept().await {
                     let acceptor = tls_acceptor.clone();
                     let addr = addr.clone();
-                    tokio::spawn(async move {
-                        if let Some(acceptor) = acceptor {
-                            let tls_socket = acceptor
-                                .accept(socket)
-                                .await
-                                .map_err(|e| error!(error=%e, "TLS socket error"))?;
+                    tokio::spawn(
+                        async move {
+                            debug!(client = %client_addr, "Client connected");
+                            if let Some(acceptor) = acceptor {
+                                let tls_socket = acceptor
+                                    .accept(socket)
+                                    .await
+                                    .map_err(|e| error!(error=%e, "TLS socket error"))?;
 
-                            if args.http {
-                                simple_http::respond_http(tls_socket, client_addr, addr.clone())
+                                if args.http {
+                                    simple_http::respond_http(
+                                        tls_socket,
+                                        client_addr,
+                                        addr.clone(),
+                                    )
                                     .await;
+                                } else {
+                                    todo!();
+                                    // tokio::spawn(respond(socket, client_addr, addr.clone()));
+                                }
                             } else {
-                                todo!();
-                                // tokio::spawn(respond(socket, client_addr, addr.clone()));
+                                if args.http {
+                                    simple_http::respond_http(socket, client_addr, addr.clone())
+                                        .await;
+                                } else {
+                                    respond(socket, client_addr, addr.clone()).await;
+                                }
                             }
-                        } else {
-                            if args.http {
-                                simple_http::respond_http(socket, client_addr, addr.clone()).await;
-                            } else {
-                                respond(socket, client_addr, addr.clone()).await;
-                            }
-                        }
 
-                        Ok::<_, ()>(())
-                    });
+                            Ok::<_, ()>(())
+                        }
+                        .then(move |_| {
+                            debug!(client = %client_addr, "Client disconnected");
+                            futures::future::ready(())
+                        }),
+                    );
                 }
                 Ok::<_, anyhow::Error>(())
             }
@@ -153,12 +165,12 @@ mod simple_http {
     where
         T: AsyncRead + AsyncWrite + Unpin,
     {
-        debug!(client = %client_addr, "Client connected");
         let mut transport = Framed::new(socket, Http);
 
         while let Some(request) = transport.next().await {
             match request {
                 Ok(_request) => {
+                    debug!(client = %client_addr, "New HTTP Request");
                     let response = {
                         let mut response = Response::builder();
                         response = response.header("Content-Type", "text/plain");
@@ -174,7 +186,6 @@ mod simple_http {
                 }
             }
         }
-        debug!(client = %client_addr, "Client disconnected");
     }
     /// Implementation of encoding an HTTP response into a `BytesMut`, basically
     /// just writing out an HTTP/1.1 response.
@@ -239,9 +250,10 @@ mod simple_http {
         fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Request<()>>> {
             // TODO: we should grow this headers array if parsing fails and asks
             //       for more headers
-            let mut headers = [None; 16];
+            const HEADERS_SIZE: usize = 32;
+            let mut headers = [None; HEADERS_SIZE];
             let (method, path, version, amt) = {
-                let mut parsed_headers = [httparse::EMPTY_HEADER; 16];
+                let mut parsed_headers = [httparse::EMPTY_HEADER; HEADERS_SIZE];
                 let mut r = httparse::Request::new(&mut parsed_headers);
                 let status = r.parse(src).map_err(|e| {
                     let msg = format!("failed to parse http request: {:?}", e);
