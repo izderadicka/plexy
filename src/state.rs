@@ -7,11 +7,12 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use tokio::{net::TcpStream, sync::watch, task::JoinHandle, time};
+use tokio::{sync::watch, task::JoinHandle, time};
 use tracing::{debug, instrument};
 
 use crate::{
     config::Args,
+    connect_remote,
     error::{Error, Result},
     state::tls::create_client_config,
     tunnel::{SocketSpec, TunnelOptions, TunnelRemoteOptions},
@@ -310,6 +311,7 @@ impl State {
                         remote.clone(),
                         Duration::from_secs_f32(options.connect_timeout),
                         Duration::from_secs_f32(10.0),
+                        options.tls_config(self),
                     ); //TODO: from options
                     tunnel.dead_remotes.insert(
                         remote.clone(),
@@ -331,6 +333,7 @@ impl State {
         remote: SocketSpec,
         timeout: Duration,
         after: Duration,
+        tls_config: Option<Arc<ClientConfig>>,
     ) -> JoinHandle<()> {
         // spawn task after given duration
         // check that can connect to remote, which should be in dead remotes
@@ -342,7 +345,7 @@ impl State {
         let f = async move {
             time::sleep(after).await;
 
-            match time::timeout(timeout, TcpStream::connect(remote.as_tuple())).await {
+            match time::timeout(timeout, connect_remote(&remote, tls_config.clone())).await {
                 Ok(Ok(_conn)) => {
                     if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
                         if let Some(DeadRemote {
@@ -369,7 +372,8 @@ impl State {
                             remote_info.num_errors += 1;
                             remote_info.last_error_time = Some(SystemTime::now());
 
-                            let new_handle = state.check_dead(local, remote, timeout, after);
+                            let new_handle =
+                                state.check_dead(local, remote, timeout, after, tls_config);
                             *join_handle = Some(new_handle);
                         }
                     }

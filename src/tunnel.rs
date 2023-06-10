@@ -1,8 +1,10 @@
+use rustls::ClientConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{Error, Result},
     state::strategy::TunnelLBStrategy,
+    State,
 };
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
@@ -77,6 +79,16 @@ pub struct TunnelRemoteOptions {
     pub connect_timeout: f32,
     pub dead_retry: f32,
     pub tls: bool,
+}
+
+impl TunnelRemoteOptions {
+    pub fn tls_config(&self, state: &State) -> Option<Arc<ClientConfig>> {
+        if self.tls {
+            Some(state.client_ssl_config())
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

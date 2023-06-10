@@ -1,8 +1,9 @@
-use std::{error::Error, net::SocketAddr, pin::Pin, time::Duration};
+use std::{error::Error, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 
 use error::Result;
 
 use futures::TryFutureExt;
+use rustls::ClientConfig;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
@@ -11,7 +12,7 @@ use tokio::{
 };
 use tokio_rustls::TlsConnector;
 use tracing::{debug, error, instrument};
-use tunnel::{SocketSpec, TunnelRemoteOptions};
+use tunnel::SocketSpec;
 
 pub use state::State;
 pub use tunnel::Tunnel;
@@ -77,14 +78,12 @@ impl tokio::io::AsyncWrite for GenericStream {
     }
 }
 
-async fn connect_remote(
+pub(crate) async fn connect_remote(
     remote: &SocketSpec,
-    options: &TunnelRemoteOptions,
-    state: &State,
+    tls_config: Option<Arc<ClientConfig>>,
 ) -> std::result::Result<GenericStream, std::io::Error> {
     let stream = TcpStream::connect(remote.as_tuple()).await?;
-    if options.tls {
-        let tls_config = state.client_ssl_config();
+    if let Some(tls_config) = tls_config {
         let connector = TlsConnector::from(tls_config);
         let domain = rustls::ServerName::try_from(remote.host())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -114,7 +113,7 @@ async fn process_socket(
                 debug!(remote=%remote, "Selected remote");
                 match timeout(
                     Duration::from_secs_f32(options.connect_timeout),
-                    connect_remote(&remote, &options, &state),
+                    connect_remote(&remote, options.tls_config(&state)),
                 )
                 .await
                 {
