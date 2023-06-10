@@ -47,15 +47,14 @@ impl<'a> CopyBuffer<'a> {
     where
         R: AsyncRead + ?Sized,
     {
-        let me = &mut *self;
-        let mut buf = ReadBuf::new(&mut me.buf);
-        buf.set_filled(me.cap);
+        let mut buf = ReadBuf::new(&mut self.buf);
+        buf.set_filled(self.cap);
 
         let res = reader.poll_read(cx, &mut buf);
         if let Poll::Ready(Ok(_)) = res {
             let filled_len = buf.filled().len();
-            me.read_done = me.cap == filled_len;
-            me.cap = filled_len;
+            self.read_done = self.cap == filled_len;
+            self.cap = filled_len;
         }
         res
     }
@@ -190,8 +189,8 @@ fn transfer_one_direction<A, B>(
     w: &mut B,
 ) -> Poll<io::Result<u64>>
 where
-    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
-    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    A: AsyncRead + Unpin + ?Sized,
+    B: AsyncWrite + Unpin + ?Sized,
 {
     let mut r = Pin::new(r);
     let mut w = Pin::new(w);
