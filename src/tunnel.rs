@@ -76,6 +76,7 @@ pub struct TunnelRemoteOptions {
     pub errors_till_dead: u64,
     pub connect_timeout: f32,
     pub dead_retry: f32,
+    pub tls: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +94,7 @@ static mut DEFAULT_TUNNEL_OPTIONS: TunnelOptions = TunnelOptions {
         errors_till_dead: 1,
         connect_timeout: 10.0,
         dead_retry: 10.0,
+        tls: false,
     },
 };
 

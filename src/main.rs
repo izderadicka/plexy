@@ -26,6 +26,7 @@ async fn main() -> plexy::error::Result<()> {
             connect_timeout: args.remote_timeout,
             errors_till_dead: args.remote_errors,
             dead_retry: args.remote_dead_check_interval,
+            tls: false,
         },
     });
 
@@ -39,7 +40,7 @@ async fn main() -> plexy::error::Result<()> {
     };
     let control_socket = args.control_socket;
     let rpc_socket = args.rpc_socket;
-    let state = State::new(args);
+    let state = State::new(args)?;
     info!(tunnels = ?tunnels, "Started plexy");
     if let Some(control_socket) = control_socket {
         info!("Control interface listening on {}", control_socket);

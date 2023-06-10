@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use parking_lot::RwLock;
+use rustls::ClientConfig;
 use serde::{Serialize, Serializer};
 use std::{
     net::SocketAddr,
@@ -12,6 +13,7 @@ use tracing::{debug, instrument};
 use crate::{
     config::Args,
     error::{Error, Result},
+    state::tls::create_client_config,
     tunnel::{SocketSpec, TunnelOptions, TunnelRemoteOptions},
     Tunnel,
 };
@@ -19,6 +21,7 @@ use crate::{
 use self::strategy::LBStrategy;
 
 pub mod strategy;
+mod tls;
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct TunnelStats {
@@ -124,6 +127,7 @@ pub struct DeadRemote {
 struct StateInner {
     tunnels: dashmap::DashMap<SocketSpec, TunnelInfo, fxhash::FxBuildHasher>,
     config: RwLock<Args>,
+    client_ssl_config: RwLock<Arc<ClientConfig>>,
 }
 
 #[derive(Clone)]
@@ -132,13 +136,19 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(args: Args) -> Self {
-        State {
+    pub fn new(args: Args) -> Result<Self> {
+        Ok(State {
             inner: Arc::new(StateInner {
                 tunnels: dashmap::DashMap::with_hasher(fxhash::FxBuildHasher::default()),
+
+                client_ssl_config: RwLock::new(Arc::new(create_client_config(&args)?)),
                 config: RwLock::new(args),
             }),
-        }
+        })
+    }
+
+    pub fn client_ssl_config(&self) -> Arc<ClientConfig> {
+        self.inner.client_ssl_config.read().clone()
     }
 
     pub fn select_remote(

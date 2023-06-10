@@ -2,6 +2,7 @@ use crate::error::Result;
 use crate::Tunnel;
 use clap::Parser;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about)]
@@ -59,6 +60,9 @@ pub struct Args {
 
     #[arg(long, help = "detailed help on tunnel specification syntax")]
     pub help_tunnel: bool,
+
+    #[arg(long, help = "alternative CA roots as PEM file")]
+    pub ca_bundle: Option<PathBuf>,
 }
 
 impl Default for Args {
@@ -73,6 +77,7 @@ impl Default for Args {
             remote_errors: 1,
             remote_dead_check_interval: 10.0,
             help_tunnel: false,
+            ca_bundle: None,
         }
     }
 }
@@ -109,6 +114,12 @@ impl Args {
     timeout=<seconds>
     # Retries for remote connection before failing the connection
     retries=<n>
+    # Consequent errors on remote to consider it's down(dead) now
+    errors=<n>
+    # Internal to check if dead remote is alive again, allows decimals
+    check-interval=<seconds>
+    # Connect to remote via TLS, default is false
+    remote-tls=<true|false>
 
     Examples of tunnel specifications:
         localhost:4444=some.remote.host.net:3333

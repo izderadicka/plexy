@@ -21,7 +21,7 @@ fn is_other_hostname_char(c: char) -> bool {
 }
 
 fn is_option_name_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || '_' == c
+    c.is_ascii_alphanumeric() || '_' == c || '-' == c
 }
 
 fn host_name(i: &str) -> IResult<&str, &str> {
@@ -93,7 +93,8 @@ fn options(i: &str) -> IResult<&str, TunnelOptions> {
                 "retries" => options.remote_connect_retries = v.parse().map_err(|_| err(v))?,
                 "timeout" => options.options.connect_timeout = v.parse().map_err(|_| err(v))?,
                 "errors" => options.options.errors_till_dead = v.parse().map_err(|_| err(v))?,
-                "check_interval" => options.options.dead_retry = v.parse().map_err(|_| err(v))?,
+                "check-interval" => options.options.dead_retry = v.parse().map_err(|_| err(v))?,
+                "remote-tls" => options.options.tls = v.parse().map_err(|_| err(v))?,
                 _ => return Err(err(k)),
             }
         }
@@ -202,13 +203,15 @@ mod tests {
 
     #[test]
     fn test_options() {
-        let options_str = "strategy=random,retries=3,timeout=10.0";
-        let (_rest, res) = options(options_str).unwrap();
+        let options_str = "strategy=random,retries=3,timeout=10.0,remote-tls=true";
+        let (rest, res) = options(options_str).unwrap();
+        assert_eq!(0, rest.len());
         assert_eq!(3, res.remote_connect_retries);
         assert!(matches!(
             res.options.connect_timeout.partial_cmp(&10.0).unwrap(),
             std::cmp::Ordering::Equal
         ));
         assert!(matches!(res.lb_strategy, TunnelLBStrategy::Random));
+        assert!(res.options.tls);
     }
 }

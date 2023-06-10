@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, pin::Pin, time::Duration};
 
 use error::Result;
 
@@ -9,8 +9,9 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
+use tokio_rustls::TlsConnector;
 use tracing::{debug, error, instrument};
-use tunnel::SocketSpec;
+use tunnel::{SocketSpec, TunnelRemoteOptions};
 
 pub use state::State;
 pub use tunnel::Tunnel;
@@ -24,6 +25,76 @@ pub mod error;
 pub mod rpc;
 mod state;
 pub mod tunnel;
+
+enum GenericStream {
+    Open(TcpStream),
+    Encrypted(tokio_rustls::client::TlsStream<TcpStream>),
+}
+
+impl tokio::io::AsyncRead for GenericStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            GenericStream::Open(me) => Pin::new(me).poll_read(cx, buf),
+            GenericStream::Encrypted(me) => Pin::new(me).poll_read(cx, buf),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for GenericStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::result::Result<usize, std::io::Error>> {
+        match self.get_mut() {
+            GenericStream::Open(me) => Pin::new(me).poll_write(cx, buf),
+            GenericStream::Encrypted(me) => Pin::new(me).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+        match self.get_mut() {
+            GenericStream::Open(me) => Pin::new(me).poll_flush(cx),
+            GenericStream::Encrypted(me) => Pin::new(me).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+        match self.get_mut() {
+            GenericStream::Open(me) => Pin::new(me).poll_shutdown(cx),
+            GenericStream::Encrypted(me) => Pin::new(me).poll_shutdown(cx),
+        }
+    }
+}
+
+async fn connect_remote(
+    remote: &SocketSpec,
+    options: &TunnelRemoteOptions,
+    state: &State,
+) -> std::result::Result<GenericStream, std::io::Error> {
+    let stream = TcpStream::connect(remote.as_tuple()).await?;
+    if options.tls {
+        let tls_config = state.client_ssl_config();
+        let connector = TlsConnector::from(tls_config);
+        let domain = rustls::ServerName::try_from(remote.host())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        Ok(GenericStream::Encrypted(
+            connector.connect(domain, stream).await?,
+        ))
+    } else {
+        Ok(GenericStream::Open(stream))
+    }
+}
 
 #[instrument(skip_all, fields(client=%local_client, tunnel=%tunnel_key))]
 async fn process_socket(
@@ -43,7 +114,7 @@ async fn process_socket(
                 debug!(remote=%remote, "Selected remote");
                 match timeout(
                     Duration::from_secs_f32(options.connect_timeout),
-                    TcpStream::connect(remote.as_tuple()),
+                    connect_remote(&remote, &options, &state),
                 )
                 .await
                 {
@@ -64,9 +135,12 @@ async fn process_socket(
                             Ok((_sent, _received)) => {
                                 // state.update_stats(&tunnel.local, received, sent, remote_client.as_ref());
                             }
-                            Err(e) => {
-                                error!(error=%e, "Error copying between streams")
-                            }
+                            Err(e) => match e.kind() {
+                                std::io::ErrorKind::UnexpectedEof => {
+                                    debug!("Unexpected end of stream")
+                                }
+                                _ => error!(error=%e, "Error copying between streams"),
+                            },
                         };
                         break;
                     }

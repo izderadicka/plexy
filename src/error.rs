@@ -26,7 +26,16 @@ pub enum Error {
     InvalidLBStrategy,
     #[error("RPC error: {0}")]
     RPCError(#[from] jsonrpsee::core::Error),
+    #[error("Certificate error: {0}")]
+    CertificateError(webpki::Error),
 }
+
+impl From<webpki::Error> for Error {
+    fn from(value: webpki::Error) -> Self {
+        Error::CertificateError(value)
+    }
+}
+
 const ERROR_BASE: i32 = 1000;
 
 impl Error {
@@ -45,6 +54,7 @@ impl Error {
             Error::NoRemote => ERROR_BASE + 11,
             Error::InvalidLBStrategy => ERROR_BASE + 12,
             Error::RPCError(_) => ERROR_BASE + 13,
+            Error::CertificateError(_) => ERROR_BASE + 14,
         }
     }
 }
