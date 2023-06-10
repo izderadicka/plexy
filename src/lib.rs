@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, pin::Pin, time::Duration};
+use std::{error::Error, net::SocketAddr, pin::Pin, time::Duration};
 
 use error::Result;
 
@@ -137,7 +137,8 @@ async fn process_socket(
                             }
                             Err(e) => match e.kind() {
                                 std::io::ErrorKind::UnexpectedEof => {
-                                    debug!("Unexpected end of stream")
+                                    let s = e.source();
+                                    debug!("Unexpected end of stream ({:?})", s)
                                 }
                                 _ => error!(error=%e, "Error copying between streams"),
                             },

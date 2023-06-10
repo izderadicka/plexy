@@ -227,8 +227,14 @@ where
             b_to_a,
         } = &mut *self;
 
-        let a_to_b = transfer_one_direction(cx, a_to_b, a, b)?;
-        let b_to_a = transfer_one_direction(cx, b_to_a, b, a)?;
+        let a_to_b = transfer_one_direction(cx, a_to_b, a, b).map_err(|e| {
+            debug!("Error on upstream copy {}", e);
+            e
+        })?;
+        let b_to_a = transfer_one_direction(cx, b_to_a, b, a).map_err(|e| {
+            debug!("Error on downstream copy {}", e);
+            e
+        })?;
 
         // It is not a problem if ready! returns early because transfer_one_direction for the
         // other direction will keep returning TransferState::Done(count) in future calls to poll
