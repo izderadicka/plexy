@@ -15,8 +15,11 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> plexy::error::Result<()> {
-    //console_subscriber::init();
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+    #[cfg(not(feature = "tokio-console"))]
     tracing_subscriber::fmt::init();
+
     let mut args = Args::parse();
     if args.help_tunnel {
         Args::tunnel_help();
