@@ -1,8 +1,11 @@
+use std::net::SocketAddr;
+
 use clap::Parser;
 use futures::TryFutureExt;
 use plexy::{
     config::Args,
     controller::run_controller,
+    metrics::{init_meter, init_prometheus},
     rpc::run_rpc_server,
     start_tunnel,
     tunnel::{set_default_tunnel_options, TunnelOptions, TunnelRemoteOptions},
@@ -40,8 +43,21 @@ async fn main() -> plexy::error::Result<()> {
     };
     let control_socket = args.control_socket;
     let rpc_socket = args.rpc_socket;
-    let state = State::new(args)?;
+
+    let (_, registry) = init_prometheus();
+    let state = State::new(args, init_meter())?;
     info!(tunnels = ?tunnels, "Started plexy");
+
+    {
+        let prometheus_socket: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        info!(
+            "Prometheus interface is running on http://{}/metrics",
+            prometheus_socket
+        );
+
+        tokio::spawn(plexy::metrics::run(prometheus_socket, registry));
+    }
+
     if let Some(control_socket) = control_socket {
         info!("Control interface listening on {}", control_socket);
         tokio::spawn(

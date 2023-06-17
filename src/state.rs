@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use opentelemetry::metrics::{Meter, UpDownCounter};
 use parking_lot::RwLock;
 use rustls::ClientConfig;
 use serde::{Serialize, Serializer};
@@ -129,6 +130,9 @@ struct StateInner {
     tunnels: dashmap::DashMap<SocketSpec, TunnelInfo, fxhash::FxBuildHasher>,
     config: RwLock<Args>,
     client_ssl_config: RwLock<Arc<ClientConfig>>,
+
+    meter: Meter,
+    tunnels_counter: UpDownCounter<i64>,
 }
 
 #[derive(Clone)]
@@ -137,13 +141,18 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(args: Args) -> Result<Self> {
+    pub fn new(args: Args, meter: Meter) -> Result<Self> {
         Ok(State {
             inner: Arc::new(StateInner {
                 tunnels: dashmap::DashMap::with_hasher(fxhash::FxBuildHasher::default()),
 
                 client_ssl_config: RwLock::new(Arc::new(create_client_config(&args)?)),
                 config: RwLock::new(args),
+                tunnels_counter: meter
+                    .i64_up_down_counter("number_of_tunnels")
+                    .with_description("Number of tunnels open")
+                    .init(),
+                meter,
             }),
         })
     }
@@ -194,6 +203,9 @@ impl State {
             tunnel.options.unwrap_or_default(),
         );
         self.inner.tunnels.insert(tunnel.local, info);
+        self.inner
+            .tunnels_counter
+            .add(&opentelemetry::Context::current(), 1, &[]);
         Ok(())
     }
 
@@ -210,6 +222,12 @@ impl State {
                 t
             })
             .ok_or(Error::TunnelDoesNotExist)
+            .and_then(|ti| {
+                self.inner
+                    .tunnels_counter
+                    .add(&opentelemetry::Context::current(), -1, &[]);
+                Ok(ti)
+            })
     }
 
     pub(crate) fn add_remote_to_tunnel(
