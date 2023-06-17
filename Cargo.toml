@@ -42,6 +42,7 @@ hyper = { version = "0.14.26", features = ["server", "tcp", "http1"], optional=t
 prometheus = {version="0.13.3", optional=true}
 
 [features]
+default = ["metrics"]
 tokio-console=["dep:console-subscriber"]
 metrics=["dep:opentelemetry", "dep:opentelemetry-prometheus", "dep:hyper", "dep:prometheus"]
 

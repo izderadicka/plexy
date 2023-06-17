@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use clap::Parser;
 use futures::TryFutureExt;
 #[cfg(feature = "metrics")]
@@ -47,6 +45,8 @@ async fn main() -> plexy::error::Result<()> {
     };
     let control_socket = args.control_socket;
     let rpc_socket = args.rpc_socket;
+    #[cfg(feature = "metrics")]
+    let prometheus_socket = args.prometheus_socket;
 
     #[cfg(feature = "metrics")]
     let state = State::new(args, init_meter())?;
@@ -57,14 +57,15 @@ async fn main() -> plexy::error::Result<()> {
 
     #[cfg(feature = "metrics")]
     {
-        let (_, registry) = init_prometheus();
-        let prometheus_socket: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        info!(
-            "Prometheus interface is running on http://{}/metrics",
-            prometheus_socket
-        );
+        if let Some(prometheus_socket) = prometheus_socket {
+            let (_, registry) = init_prometheus();
+            info!(
+                "Prometheus interface is running on http://{}/metrics",
+                prometheus_socket
+            );
 
-        tokio::spawn(plexy::metrics::run(prometheus_socket, registry));
+            tokio::spawn(plexy::metrics::run(prometheus_socket, registry));
+        }
     }
 
     if let Some(control_socket) = control_socket {

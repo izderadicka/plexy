@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use opentelemetry::metrics;
 #[cfg(feature = "metrics")]
 use opentelemetry::metrics::{Meter, UpDownCounter};
 use parking_lot::RwLock;
@@ -35,12 +36,52 @@ pub struct TunnelStats {
     pub errors: u64,
 }
 
+#[cfg(feature = "metrics")]
+#[derive(Debug)]
+pub struct TunnelMetrics {
+    pub bytes_sent: metrics::Counter<u64>,
+    pub streams_open: metrics::UpDownCounter<i64>,
+    pub bytes_received: metrics::Counter<u64>,
+    pub total_connections: metrics::Counter<u64>,
+    pub errors: metrics::Counter<u64>,
+}
+
+#[cfg(feature = "metrics")]
+impl TunnelMetrics {
+    pub fn new(meter: &opentelemetry::metrics::Meter) -> Self {
+        TunnelMetrics {
+            bytes_sent: meter
+                .u64_counter("tunnel_bytes_sent")
+                .with_description("total bytes sent by tunnel")
+                .init(),
+            streams_open: meter
+                .i64_up_down_counter("tunnel_streams_open")
+                .with_description("number of currently opened connections")
+                .init(),
+            bytes_received: meter
+                .u64_counter("tunnel_bytes_received")
+                .with_description("total bytes received by tunnel")
+                .init(),
+            total_connections: meter
+                .u64_counter("tunnel_total_connections")
+                .with_description("total number of connections per whole tunnel life")
+                .init(),
+            errors: meter
+                .u64_counter("tunnel_errors")
+                .with_description("total number of errors per whole tunnel life")
+                .init(),
+        }
+    }
+}
+
 type RemotesMap = IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>;
 type DeadRemotesMap = IndexMap<SocketSpec, DeadRemote, fxhash::FxBuildHasher>;
 
 #[derive(Debug)]
 pub struct TunnelInfo {
     pub stats: TunnelStats,
+    #[cfg(feature = "metrics")]
+    pub metrics: TunnelMetrics,
     pub close_channel: watch::Sender<bool>,
     pub remotes: RemotesMap,
     pub dead_remotes: DeadRemotesMap,
@@ -54,6 +95,7 @@ impl TunnelInfo {
         close_channel: watch::Sender<bool>,
         remotes: Vec<SocketSpec>,
         options: TunnelOptions,
+        state: &State,
     ) -> Self {
         let lb_strategy = options.lb_strategy.create();
         TunnelInfo {
@@ -67,6 +109,8 @@ impl TunnelInfo {
             lb_strategy,
             options,
             last_selected_index: None,
+            #[cfg(feature = "metrics")]
+            metrics: TunnelMetrics::new(state.meter()),
         }
     }
 }
@@ -160,6 +204,7 @@ impl State {
         })
     }
 
+    #[cfg(not(feature = "metrics"))]
     pub fn new(args: Args) -> Result<Self> {
         Ok(State {
             inner: Arc::new(StateInner {
@@ -169,6 +214,11 @@ impl State {
                 config: RwLock::new(args),
             }),
         })
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn meter(&self) -> &Meter {
+        &self.inner.meter
     }
 
     pub fn client_ssl_config(&self) -> Arc<ClientConfig> {
@@ -215,6 +265,7 @@ impl State {
             close_channel,
             tunnel.remote,
             tunnel.options.unwrap_or_default(),
+            self,
         );
         self.inner.tunnels.insert(tunnel.local, info);
         #[cfg(feature = "metrics")]
