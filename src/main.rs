@@ -2,10 +2,11 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 use futures::TryFutureExt;
+#[cfg(feature = "metrics")]
+use plexy::metrics::{init_meter, init_prometheus};
 use plexy::{
     config::Args,
     controller::run_controller,
-    metrics::{init_meter, init_prometheus},
     rpc::run_rpc_server,
     start_tunnel,
     tunnel::{set_default_tunnel_options, TunnelOptions, TunnelRemoteOptions},
@@ -47,11 +48,16 @@ async fn main() -> plexy::error::Result<()> {
     let control_socket = args.control_socket;
     let rpc_socket = args.rpc_socket;
 
-    let (_, registry) = init_prometheus();
+    #[cfg(feature = "metrics")]
     let state = State::new(args, init_meter())?;
+    #[cfg(not(feature = "metrics"))]
+    let state = State::new(args)?;
+
     info!(tunnels = ?tunnels, "Started plexy");
 
+    #[cfg(feature = "metrics")]
     {
+        let (_, registry) = init_prometheus();
         let prometheus_socket: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         info!(
             "Prometheus interface is running on http://{}/metrics",

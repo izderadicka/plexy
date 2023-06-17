@@ -23,6 +23,7 @@ mod aio;
 pub mod config;
 pub mod controller;
 pub mod error;
+#[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod rpc;
 mod state;

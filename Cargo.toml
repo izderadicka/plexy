@@ -34,13 +34,16 @@ tracing-subscriber = "0.3.16"
 rustls-pemfile = "1.0.2"
 webpki = "0.22.0"
 webpki-roots = "0.23.1"
-opentelemetry = { version = "0.19.0", features = ["metrics", "rt-tokio"] }
-opentelemetry-prometheus = { version = "0.12.0", features = ["prometheus-encoding"] }
-hyper = { version = "0.14.26", features = ["server", "tcp", "http1"] }
-prometheus = "0.13.3"
+
+
+opentelemetry = { version = "0.19.0", features = ["metrics", "rt-tokio"], optional=true }
+opentelemetry-prometheus = { version = "0.12.0", features = ["prometheus-encoding"], optional=true }
+hyper = { version = "0.14.26", features = ["server", "tcp", "http1"], optional=true }
+prometheus = {version="0.13.3", optional=true}
 
 [features]
 tokio-console=["dep:console-subscriber"]
+metrics=["dep:opentelemetry", "dep:opentelemetry-prometheus", "dep:hyper", "dep:prometheus"]
 
 [dev-dependencies]
 anyhow = "1.0.68"

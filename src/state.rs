@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+#[cfg(feature = "metrics")]
 use opentelemetry::metrics::{Meter, UpDownCounter};
 use parking_lot::RwLock;
 use rustls::ClientConfig;
@@ -130,8 +131,9 @@ struct StateInner {
     tunnels: dashmap::DashMap<SocketSpec, TunnelInfo, fxhash::FxBuildHasher>,
     config: RwLock<Args>,
     client_ssl_config: RwLock<Arc<ClientConfig>>,
-
+    #[cfg(feature = "metrics")]
     meter: Meter,
+    #[cfg(feature = "metrics")]
     tunnels_counter: UpDownCounter<i64>,
 }
 
@@ -141,6 +143,7 @@ pub struct State {
 }
 
 impl State {
+    #[cfg(feature = "metrics")]
     pub fn new(args: Args, meter: Meter) -> Result<Self> {
         Ok(State {
             inner: Arc::new(StateInner {
@@ -153,6 +156,17 @@ impl State {
                     .with_description("Number of tunnels open")
                     .init(),
                 meter,
+            }),
+        })
+    }
+
+    pub fn new(args: Args) -> Result<Self> {
+        Ok(State {
+            inner: Arc::new(StateInner {
+                tunnels: dashmap::DashMap::with_hasher(fxhash::FxBuildHasher::default()),
+
+                client_ssl_config: RwLock::new(Arc::new(create_client_config(&args)?)),
+                config: RwLock::new(args),
             }),
         })
     }
@@ -203,9 +217,12 @@ impl State {
             tunnel.options.unwrap_or_default(),
         );
         self.inner.tunnels.insert(tunnel.local, info);
-        self.inner
-            .tunnels_counter
-            .add(&opentelemetry::Context::current(), 1, &[]);
+        #[cfg(feature = "metrics")]
+        {
+            self.inner
+                .tunnels_counter
+                .add(&opentelemetry::Context::current(), 1, &[]);
+        }
         Ok(())
     }
 
@@ -223,9 +240,12 @@ impl State {
             })
             .ok_or(Error::TunnelDoesNotExist)
             .and_then(|ti| {
-                self.inner
-                    .tunnels_counter
-                    .add(&opentelemetry::Context::current(), -1, &[]);
+                #[cfg(feature = "metrics")]
+                {
+                    self.inner
+                        .tunnels_counter
+                        .add(&opentelemetry::Context::current(), -1, &[]);
+                }
                 Ok(ti)
             })
     }
