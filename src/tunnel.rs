@@ -14,12 +14,10 @@ mod parser;
 
 /// This is our equivalence to SocketAddr, but with host name
 /// As it is expected to move around thread frequently,
-/// host name is an immutable string in Arc,
-/// Which is better for cloning
+/// it's implemented as referenced string
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SocketSpec {
     inner: Arc<str>,
-    //port: u16,
 }
 
 impl SocketSpec {
@@ -86,20 +84,6 @@ impl From<&SocketSpec> for opentelemetry::Value {
 impl From<SocketSpec> for opentelemetry::Value {
     fn from(value: SocketSpec) -> Self {
         opentelemetry::Value::String(value.inner.into())
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl From<&SocketSpec> for opentelemetry::Value {
-    fn from(value: &SocketSpec) -> Self {
-        opentelemetry::Value::String(value.to_string().into())
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl From<SocketSpec> for opentelemetry::Value {
-    fn from(value: SocketSpec) -> Self {
-        opentelemetry::Value::String(value.to_string().into())
     }
 }
 
