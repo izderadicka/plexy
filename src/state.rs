@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
-use opentelemetry::metrics;
 #[cfg(feature = "metrics")]
 use opentelemetry::metrics::{Meter, UpDownCounter};
+use opentelemetry::{metrics, Context, KeyValue};
 use parking_lot::RwLock;
 use rustls::ClientConfig;
 use serde::{Serialize, Serializer};
@@ -103,7 +103,7 @@ impl TunnelInfo {
             close_channel,
             remotes: remotes
                 .into_iter()
-                .map(|k| (k, RemoteInfo::default()))
+                .map(|k| (k, RemoteInfo::new(state)))
                 .collect(),
             dead_remotes: IndexMap::with_hasher(fxhash::FxBuildHasher::default()),
             lb_strategy,
@@ -134,8 +134,25 @@ impl TunnelInfo {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug)]
 pub struct RemoteInfo {
+    pub stats: RemoteStats,
+    #[cfg(feature = "metrics")]
+    pub metrics: RemoteMetrics,
+}
+
+impl RemoteInfo {
+    pub fn new(_state: &State) -> Self {
+        RemoteInfo {
+            stats: RemoteStats::default(),
+            #[cfg(feature = "metrics")]
+            metrics: RemoteMetrics::new(_state.meter()),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct RemoteStats {
     pub bytes_sent: u64,
     pub streams_open: usize,
     pub streams_pending: usize,
@@ -145,6 +162,54 @@ pub struct RemoteInfo {
     pub last_error_time: Option<SystemTime>,
     pub num_errors: u64,
     pub total_errors: u64,
+}
+
+#[cfg(feature = "metrics")]
+#[derive(Debug)]
+pub struct RemoteMetrics {
+    pub bytes_sent: opentelemetry::metrics::Counter<u64>,
+    pub streams_open: opentelemetry::metrics::UpDownCounter<i64>,
+    pub streams_pending: opentelemetry::metrics::UpDownCounter<i64>,
+    pub bytes_received: opentelemetry::metrics::Counter<u64>,
+    pub total_connections: opentelemetry::metrics::Counter<u64>,
+    pub num_errors: opentelemetry::metrics::UpDownCounter<i64>,
+    pub total_errors: opentelemetry::metrics::Counter<u64>,
+}
+
+#[cfg(feature = "metrics")]
+impl RemoteMetrics {
+    pub fn new(meter: &Meter) -> Self {
+        Self {
+            bytes_sent: meter
+                .u64_counter("remote_bytes_sent")
+                .with_description("bytes send via remote connection")
+                .init(),
+            streams_open: meter
+                .i64_up_down_counter("remote_streams_open")
+                .with_description("number of currently opened remote connections")
+                .init(),
+            streams_pending: meter
+                .i64_up_down_counter("remote_streams_pending")
+                .with_description("number of remote connections waiting to open")
+                .init(),
+            bytes_received: meter
+                .u64_counter("remote_bytes_received")
+                .with_description("bytes receive from remote connection")
+                .init(),
+            total_connections: meter
+                .u64_counter("remote_total_connections")
+                .with_description("total remote connections")
+                .init(),
+            num_errors: meter
+                .i64_up_down_counter("remote_errors")
+                .with_description("number of consequent errors")
+                .init(),
+            total_errors: meter
+                .u64_counter("retote_total_error")
+                .with_description("total number of errors")
+                .init(),
+        }
+    }
 }
 
 fn to_epoch_millis<S>(
@@ -165,7 +230,7 @@ where
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DeadRemote {
     pub remote: RemoteInfo,
     pub join_handle: Option<JoinHandle<()>>,
@@ -240,7 +305,18 @@ impl State {
             .get_mut(&selected)
             .ok_or_else(|| Error::NoRemote)?;
 
-        remote.streams_pending += 1;
+        remote.stats.streams_pending += 1;
+        #[cfg(feature = "metrics")]
+        {
+            remote.metrics.streams_pending.add(
+                &Context::current(),
+                1,
+                &[
+                    KeyValue::new("tunnel", tunnel_key),
+                    KeyValue::new("remote", &selected),
+                ],
+            )
+        }
         Ok((selected, ti.options.options.clone()))
     }
 
@@ -312,7 +388,7 @@ impl State {
             .get_mut(tunnel)
             .ok_or_else(|| Error::TunnelDoesNotExist)?;
         if !ti.remotes.contains_key(&remote) && !ti.dead_remotes.contains_key(&remote) {
-            ti.remotes.insert(remote, RemoteInfo::default());
+            ti.remotes.insert(remote, RemoteInfo::new(self));
             Ok(())
         } else {
             Err(Error::RemoteExists)
@@ -367,10 +443,10 @@ impl State {
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             if let Some(rec) = rec.remotes.get_mut(remote) {
-                rec.streams_open += 1;
-                rec.total_connections += 1;
-                rec.streams_pending -= 1;
-                rec.num_errors = 0;
+                rec.stats.streams_open += 1;
+                rec.stats.total_connections += 1;
+                rec.stats.streams_pending -= 1;
+                rec.stats.num_errors = 0;
             }
         };
     }
@@ -386,11 +462,11 @@ impl State {
             tunnel.stats.errors += 1;
             let mut is_dead = false;
             if let Some(remote_info) = tunnel.remotes.get_mut(remote) {
-                remote_info.total_errors += 1;
-                remote_info.num_errors += 1;
-                remote_info.last_error_time = Some(SystemTime::now());
-                remote_info.streams_pending -= 1;
-                is_dead = remote_info.num_errors >= options.errors_till_dead;
+                remote_info.stats.total_errors += 1;
+                remote_info.stats.num_errors += 1;
+                remote_info.stats.last_error_time = Some(SystemTime::now());
+                remote_info.stats.streams_pending -= 1;
+                is_dead = remote_info.stats.num_errors >= options.errors_till_dead;
             }
 
             if is_dead {
@@ -441,7 +517,7 @@ impl State {
                             remote: mut rec, ..
                         }) = tunnel.dead_remotes.remove(&remote)
                         {
-                            rec.num_errors = 0;
+                            rec.stats.num_errors = 0;
                             debug!(
                                 "Tunnel remote {} is live again, removed from dead remotes",
                                 remote
@@ -457,9 +533,9 @@ impl State {
                             ref mut join_handle,
                         }) = tunnel.dead_remotes.get_mut(&remote)
                         {
-                            remote_info.total_errors += 1;
-                            remote_info.num_errors += 1;
-                            remote_info.last_error_time = Some(SystemTime::now());
+                            remote_info.stats.total_errors += 1;
+                            remote_info.stats.num_errors += 1;
+                            remote_info.stats.last_error_time = Some(SystemTime::now());
 
                             let new_handle =
                                 state.check_dead(local, remote, timeout, after, tls_config);
@@ -488,9 +564,9 @@ impl State {
             }
             if let Some(rec) = rec.remotes.get_mut(remote) {
                 if sent {
-                    rec.bytes_sent += bytes;
+                    rec.stats.bytes_sent += bytes;
                 } else {
-                    rec.bytes_received += bytes;
+                    rec.stats.bytes_received += bytes;
                 }
             }
         };
@@ -507,7 +583,7 @@ impl State {
             //TODO: refactor when if let chain will become stable
             if let Some(remote) = remote {
                 if let Some(rec) = rec.remotes.get_mut(remote) {
-                    rec.streams_open -= 1;
+                    rec.stats.streams_open -= 1;
                 }
             }
         }
@@ -531,7 +607,7 @@ impl State {
         Ok(ti.value().into())
     }
 
-    pub fn remotes(&self, local: &SocketSpec) -> Result<(Vec<(SocketSpec, RemoteInfo)>, usize)> {
+    pub fn remotes(&self, local: &SocketSpec) -> Result<(Vec<(SocketSpec, RemoteStats)>, usize)> {
         self.inner
             .tunnels
             .get(local)
@@ -539,7 +615,7 @@ impl State {
                 (
                     t.remotes
                         .iter()
-                        .map(|r| (r.0.clone(), r.1.clone()))
+                        .map(|r| (r.0.clone(), r.1.stats.clone()))
                         .collect(),
                     t.dead_remotes.len(),
                 )

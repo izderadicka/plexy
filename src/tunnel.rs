@@ -73,6 +73,20 @@ impl Display for SocketSpec {
     }
 }
 
+#[cfg(feature = "metrics")]
+impl From<&SocketSpec> for opentelemetry::Value {
+    fn from(value: &SocketSpec) -> Self {
+        opentelemetry::Value::String(value.to_string().into())
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl From<SocketSpec> for opentelemetry::Value {
+    fn from(value: SocketSpec) -> Self {
+        opentelemetry::Value::String(value.to_string().into())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelRemoteOptions {
     pub errors_till_dead: u64,
