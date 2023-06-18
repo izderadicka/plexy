@@ -49,7 +49,11 @@ async fn main() -> plexy::error::Result<()> {
     let prometheus_socket = args.prometheus_socket;
 
     #[cfg(feature = "metrics")]
-    let state = State::new(args, init_meter())?;
+    let (state, registry) = {
+        let (_, registry) = init_prometheus();
+        let state = State::new(args, init_meter())?;
+        (state, registry)
+    };
     #[cfg(not(feature = "metrics"))]
     let state = State::new(args)?;
 
@@ -58,7 +62,6 @@ async fn main() -> plexy::error::Result<()> {
     #[cfg(feature = "metrics")]
     {
         if let Some(prometheus_socket) = prometheus_socket {
-            let (_, registry) = init_prometheus();
             info!(
                 "Prometheus interface is running on http://{}/metrics",
                 prometheus_socket
