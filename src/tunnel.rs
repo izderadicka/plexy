@@ -18,21 +18,27 @@ mod parser;
 /// Which is better for cloning
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SocketSpec {
-    host: Arc<str>,
-    port: u16,
+    inner: Arc<str>,
+    //port: u16,
 }
 
 impl SocketSpec {
     pub fn as_tuple(&self) -> (&str, u16) {
-        (&*self.host, self.port)
+        // here we assume that inner str is in normalized form
+        let (mut host, port) = self.inner.rsplit_once(':').unwrap();
+        if host.starts_with('[') && host.ends_with(']') {
+            host = &host[1..host.len() - 1];
+        }
+        let port = port.parse().unwrap();
+        (host, port)
     }
 
     pub fn port(&self) -> u16 {
-        self.port
+        self.as_tuple().1
     }
 
     pub fn host(&self) -> &str {
-        &self.host
+        self.as_tuple().0
     }
 }
 
@@ -65,11 +71,21 @@ impl FromStr for SocketSpec {
 
 impl Display for SocketSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.host.contains(':') {
-            write!(f, "[{}]:{}", self.host, self.port)
-        } else {
-            write!(f, "{}:{}", self.host, self.port)
-        }
+        f.write_str(&self.inner)
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl From<&SocketSpec> for opentelemetry::Value {
+    fn from(value: &SocketSpec) -> Self {
+        opentelemetry::Value::String(value.inner.clone().into())
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl From<SocketSpec> for opentelemetry::Value {
+    fn from(value: SocketSpec) -> Self {
+        opentelemetry::Value::String(value.inner.into())
     }
 }
 

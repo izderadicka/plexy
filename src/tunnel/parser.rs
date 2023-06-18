@@ -51,23 +51,29 @@ fn ipv4(i: &str) -> IResult<&str, &str> {
 }
 fn socket_spec1(i: &str) -> IResult<&str, SocketSpec> {
     map(port, |port| SocketSpec {
-        port,
-        host: "127.0.0.1".into(),
+        inner: format!("127.0.0.1:{}", port).into(),
     })(i)
 }
 
 fn socket_spec2(i: &str) -> IResult<&str, SocketSpec> {
     map(
-        separated_pair(alt((host_name, ipv4, ipv6)), char(':'), port),
+        separated_pair(alt((host_name, ipv4)), char(':'), port),
         |(host, port)| SocketSpec {
-            host: host.into(),
-            port,
+            inner: format!("{}:{}", host, port).into(),
         },
     )(i)
 }
 
+fn socket_spec3(i: &str) -> IResult<&str, SocketSpec> {
+    map(separated_pair(ipv6, char(':'), port), |(host, port)| {
+        SocketSpec {
+            inner: format!("[{}]:{}", host, port).into(),
+        }
+    })(i)
+}
+
 pub(super) fn socket_spec(i: &str) -> IResult<&str, SocketSpec> {
-    alt((socket_spec2, socket_spec1))(i)
+    alt((socket_spec3, socket_spec2, socket_spec1))(i)
 }
 
 fn options(i: &str) -> IResult<&str, TunnelOptions> {
@@ -192,13 +198,20 @@ mod tests {
     fn test_socket_spec() {
         let x = "localhost:3333";
         let (_rest, s) = socket_spec(x).expect("valid socket address");
-        assert_eq!("localhost", s.host.as_ref());
-        assert_eq!(3333, s.port);
+        assert_eq!("localhost", s.host());
+        assert_eq!(3333, s.port());
 
         let y = "127.0.0.1:3000";
         let (_rest, s) = socket_spec(y).expect("valid socket address");
-        assert_eq!("127.0.0.1", s.host.as_ref());
-        assert_eq!(3000, s.port);
+        assert_eq!("127.0.0.1", s.host());
+        assert_eq!(3000, s.port());
+
+        let z = "[2001:db8::1234:5678]:8080";
+        let (rest, s) = socket_spec(z).expect("valid ipv6 socket spec");
+        assert_eq!(0, rest.len());
+        assert_eq!(8080, s.port());
+        assert_eq!("2001:db8::1234:5678", s.host());
+        assert_eq!(("2001:db8::1234:5678", 8080), s.as_tuple());
     }
 
     #[test]
