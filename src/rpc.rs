@@ -7,7 +7,10 @@ use serde::Serialize;
 use crate::{
     error::Error,
     start_tunnel,
-    state::{RemoteStats, TunnelInfo, TunnelStats},
+    state::{
+        stats::{RemoteStats, TunnelStats},
+        TunnelInfo,
+    },
     stop_tunnel,
     tunnel::{SocketSpec, TunnelOptions},
     State, Tunnel,
