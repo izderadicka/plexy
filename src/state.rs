@@ -1,16 +1,9 @@
-use indexmap::IndexMap;
 #[cfg(feature = "metrics")]
 use opentelemetry::metrics::{Meter, UpDownCounter};
-#[cfg(feature="metrics")]
-use opentelemetry::{metrics, Context, KeyValue};
+
 use parking_lot::RwLock;
 use rustls::ClientConfig;
-use serde::{Serialize, Serializer};
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinHandle, time};
 use tracing::{debug, instrument};
 
@@ -23,97 +16,15 @@ use crate::{
     Tunnel,
 };
 
-use self::{strategy::LBStrategy, stats::{TunnelStats, TunnelMetrics, RemoteStats, RemoteMetrics}};
+use self::{
+    info::{DeadRemote, RemoteInfo, TunnelInfo},
+    stats::{RemoteStats, TunnelStats},
+};
 
+pub mod info;
+pub mod stats;
 pub mod strategy;
 mod tls;
-pub mod stats;
-
-
-type RemotesMap = IndexMap<SocketSpec, RemoteInfo, fxhash::FxBuildHasher>;
-type DeadRemotesMap = IndexMap<SocketSpec, DeadRemote, fxhash::FxBuildHasher>;
-
-#[derive(Debug)]
-pub struct TunnelInfo {
-    pub stats: TunnelStats,
-    #[cfg(feature = "metrics")]
-    pub metrics: TunnelMetrics,
-    pub close_channel: watch::Sender<bool>,
-    pub remotes: RemotesMap,
-    pub dead_remotes: DeadRemotesMap,
-    pub options: TunnelOptions,
-    lb_strategy: Box<dyn LBStrategy + Send + Sync + 'static>,
-    last_selected_index: Option<usize>,
-}
-
-impl TunnelInfo {
-    pub fn new(
-        close_channel: watch::Sender<bool>,
-        remotes: Vec<SocketSpec>,
-        options: TunnelOptions,
-        state: &State,
-    ) -> Self {
-        let lb_strategy = options.lb_strategy.create();
-        TunnelInfo {
-            stats: TunnelStats::default(),
-            close_channel,
-            remotes: remotes
-                .into_iter()
-                .map(|k| (k, RemoteInfo::new(state)))
-                .collect(),
-            dead_remotes: IndexMap::with_hasher(fxhash::FxBuildHasher::default()),
-            lb_strategy,
-            options,
-            last_selected_index: None,
-            #[cfg(feature = "metrics")]
-            metrics: TunnelMetrics::new(state.meter()),
-        }
-    }
-}
-
-impl TunnelInfo {
-    pub fn select_remote(&mut self) -> Result<SocketSpec> {
-        let size = self.remotes.len();
-        let idx = if size == 0 {
-            return Err(Error::NoRemote);
-        } else if size == 1 {
-            0
-        } else {
-            self.lb_strategy.select_remote(self)?
-        };
-        self.last_selected_index = Some(idx);
-        self.remotes
-            .get_index(idx)
-            .map(|(k, _)| k)
-            .ok_or(Error::NoRemote)
-            .cloned()
-    }
-}
-
-#[derive(Debug)]
-pub struct RemoteInfo {
-    pub stats: RemoteStats,
-    #[cfg(feature = "metrics")]
-    pub metrics: RemoteMetrics,
-}
-
-impl RemoteInfo {
-    pub fn new(_state: &State) -> Self {
-        RemoteInfo {
-            stats: RemoteStats::default(),
-            #[cfg(feature = "metrics")]
-            metrics: RemoteMetrics::new(_state.meter()),
-        }
-    }
-}
-
-
-
-#[derive(Debug)]
-pub struct DeadRemote {
-    pub remote: RemoteInfo,
-    pub join_handle: Option<JoinHandle<()>>,
-}
 
 struct StateInner {
     tunnels: dashmap::DashMap<SocketSpec, TunnelInfo, fxhash::FxBuildHasher>,
@@ -128,27 +39,6 @@ struct StateInner {
 #[derive(Clone)]
 pub struct State {
     inner: Arc<StateInner>,
-}
-
-#[cfg(feature = "metrics")]
-macro_rules! metric_add {
-    ($($met:expr => $val: expr),+ ;  $tun: expr) => {
-        {
-        let attrs = &[KeyValue::new("tunnel", $tun)];
-        $(
-        $met.add(&Context::current(), $val, attrs);
-        )+
-    }
-    };
-
-    ($($met:expr => $val: expr),+ ;  $tun: expr, $rem: expr) => {
-        {
-        let attrs = &[KeyValue::new("tunnel", $tun),  KeyValue::new("remote", $rem)];
-        $(
-        $met.add(&Context::current(), $val, attrs);
-        )+
-        }
-    };
 }
 
 impl State {
@@ -205,11 +95,7 @@ impl State {
             .get_mut(&selected)
             .ok_or_else(|| Error::NoRemote)?;
 
-        remote.stats.streams_pending += 1;
-        #[cfg(feature = "metrics")]
-        {
-            metric_add!(remote.metrics.streams_pending => 1 ; tunnel_key, &selected);
-        }
+        remote.new_pending_stream(tunnel_key, &selected);
         Ok((selected, ti.options.options.clone()))
     }
 
@@ -321,17 +207,9 @@ impl State {
             .collect()
     }
 
-    pub fn client_connected(&self, local: &SocketSpec, _client_addr: &SocketAddr) {
+    pub fn client_connected(&self, local: &SocketSpec, client_addr: &SocketAddr) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
-            rec.stats.total_connections += 1;
-            rec.stats.streams_open += 1;
-
-            #[cfg(feature = "metrics")]
-            {
-                metric_add!(rec.metrics.total_connections => 1 , 
-                            rec.metrics.streams_open => 1; 
-                            local);
-            }
+            rec.client_connected(local, client_addr);
         };
     }
 
@@ -339,29 +217,11 @@ impl State {
         &self,
         local: &SocketSpec,
         remote: &SocketSpec,
-        _client_addr: &SocketAddr,
+        client_addr: &SocketAddr,
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
             if let Some(rec) = rec.remotes.get_mut(remote) {
-
-                #[cfg(feature="metrics")]
-                {
-                    
-                    metric_add!(
-                        rec.metrics.streams_open => 1,
-                        rec.metrics.total_connections => 1,
-                        rec.metrics.streams_pending => -1, 
-                        rec.metrics.num_errors => - (rec.stats.num_errors as i64);
-                        local, remote
-                    )
-                }
-
-                rec.stats.streams_open += 1;
-                rec.stats.total_connections += 1;
-                rec.stats.streams_pending -= 1;
-                rec.stats.num_errors = 0;
-
-                
+                rec.remote_connected(local, remote, client_addr);
             }
         };
     }
@@ -370,32 +230,16 @@ impl State {
         &self,
         local: &SocketSpec,
         remote: &SocketSpec,
-        _client_addr: &SocketAddr,
+        client_addr: &SocketAddr,
         options: &TunnelRemoteOptions,
     ) {
         if let Some(mut tunnel) = self.inner.tunnels.get_mut(local) {
-            tunnel.stats.errors += 1;
-            #[cfg(feature="metrics")]
-            {
-                metric_add!(tunnel.metrics.errors =>1 ; local);
-            }
+            tunnel.remote_error(local, remote, Some(client_addr));
+
             let mut is_dead = false;
             if let Some(remote_info) = tunnel.remotes.get_mut(remote) {
-                remote_info.stats.total_errors += 1;
-                remote_info.stats.num_errors += 1;
-                remote_info.stats.last_error_time = Some(SystemTime::now());
-                remote_info.stats.streams_pending -= 1;
+                remote_info.error(local, remote, Some(client_addr));
                 is_dead = remote_info.stats.num_errors >= options.errors_till_dead;
-
-                #[cfg(feature="metrics")]
-                {
-                    metric_add!(
-                    remote_info.metrics.total_errors => 1,
-                    remote_info.metrics.num_errors => 1,
-                    remote_info.metrics.streams_pending => -1;
-                    local, remote);
-
-                }
             }
 
             if is_dead {
@@ -446,14 +290,8 @@ impl State {
                             remote: mut rec, ..
                         }) = tunnel.dead_remotes.remove(&remote)
                         {
-                            #[cfg(feature="metrics")]
-                            {
-                                metric_add!(
-                                    rec.metrics.num_errors => - (rec.stats.num_errors as i64);
-                                    local, &remote
-                                )
-                            }
-                            rec.stats.num_errors = 0;
+                            rec.remote_recovered(&local, &remote);
+
                             debug!(
                                 "Tunnel remote {} is live again, removed from dead remotes",
                                 remote
@@ -464,23 +302,13 @@ impl State {
                 }
                 Ok(Err(_)) | Err(_) => {
                     if let Some(mut tunnel) = state.inner.tunnels.get_mut(&local) {
+                        tunnel.remote_error(&local, &remote, None);
                         if let Some(DeadRemote {
                             remote: ref mut remote_info,
                             ref mut join_handle,
                         }) = tunnel.dead_remotes.get_mut(&remote)
                         {
-                            remote_info.stats.total_errors += 1;
-                            remote_info.stats.num_errors += 1;
-                            remote_info.stats.last_error_time = Some(SystemTime::now());
-
-                            #[cfg(feature="metrics")]
-                            {
-                                metric_add!(
-                                    remote_info.metrics.total_errors => 1,
-                                    remote_info.metrics.num_errors => 1;
-                                    &local, &remote
-                                )
-                            }
+                            remote_info.error(&local, &remote, None);
 
                             let new_handle =
                                 state.check_dead(local, remote, timeout, after, tls_config);
@@ -502,21 +330,9 @@ impl State {
         _client_addr: SocketAddr,
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
-            if sent {
-                rec.stats.bytes_sent += bytes;
-                #[cfg(feature="metrics")]
-                {
-                    metric_add!(rec.metrics.bytes_sent => bytes; local)
-                }
-            } else {
-                rec.stats.bytes_received += bytes;
-            }
+            rec.update_moved_bytes(sent, bytes, local);
             if let Some(rec) = rec.remotes.get_mut(remote) {
-                if sent {
-                    rec.stats.bytes_sent += bytes;
-                } else {
-                    rec.stats.bytes_received += bytes;
-                }
+                rec.update_moved_bytes(sent, bytes, local, remote);
             }
         };
     }
@@ -528,11 +344,11 @@ impl State {
         _client_addr: &SocketAddr,
     ) {
         if let Some(mut rec) = self.inner.tunnels.get_mut(local) {
-            rec.stats.streams_open -= 1;
+            rec.client_disconnected(local, remote, _client_addr);
             //TODO: refactor when if let chain will become stable
             if let Some(remote) = remote {
                 if let Some(rec) = rec.remotes.get_mut(remote) {
-                    rec.stats.streams_open -= 1;
+                    rec.client_disconnected(local, remote, _client_addr);
                 }
             }
         }

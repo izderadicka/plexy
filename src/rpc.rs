@@ -8,8 +8,8 @@ use crate::{
     error::Error,
     start_tunnel,
     state::{
+        info::TunnelInfo,
         stats::{RemoteStats, TunnelStats},
-        TunnelInfo,
     },
     stop_tunnel,
     tunnel::{SocketSpec, TunnelOptions},
