@@ -4,11 +4,26 @@ Simple flexible dynamic TCP proxy, all asynchronous and written in Rust.
 
 ## About
 
-TCP proxy, where tunnels can be opened and closed in runtime.
-Tunnel is specified by this expression: `local_address:local_port=remote_address:remote_port`
-Plexy listens on port (9999 by default) for simple control commands (telnet like protocol).
+TCP proxy, where tunnels can be opened, changed and closed in dynamically in runtime.
+Also supports:
+- load balancing tunnel to several backends with few simple (choosable) loadbalancing strategies
+- TLS termination - tunnel can terminate TLS for backends 
+- simple line base control protocol (can control proxy via telnet, netcat ...)
+- JSONPRC API for programatic control
+- metrics collections to Prometheus (and possibly to OpenTelemetry)
 
-Example of interaction with plexy:
+
+## Usage
+
+Basically you can open as many tunnels as you want, either you specify them as argument on program start or you can add them when program is running.
+
+Tunnel is specified by this expression: `local_socket=remote_socket[,remote_socket ...][\[options\]]`, e.g. local TCP socket address (address/host:port), 
+list of remote socket addresses and and possibly some options in square brackets.  Run `plexy --help-tunnel` for more details about tunnel definition.
+
+Once started you can interact with plexy either by simple line protocol (listening on port defined by `--control-socket` argument and/or by [JSONRPC](https://www.jsonrpc.org/specification) protocol on port defined on `rpc-socket` argument.
+Via control protocol/API you can add remote ends to tunnels, create new tunnels, close tunnels, get tunnel info etc.
+
+### Example of interaction with plexy via simple command line protocol:
 
 ```
 $ nc localhost 9999
