@@ -7,7 +7,10 @@ use serde::Serialize;
 use crate::{
     error::Error,
     start_tunnel,
-    state::{RemoteInfo, TunnelInfo, TunnelStats},
+    state::{
+        info::TunnelInfo,
+        stats::{RemoteStats, TunnelStats},
+    },
     stop_tunnel,
     tunnel::{SocketSpec, TunnelOptions},
     State, Tunnel,
@@ -49,7 +52,7 @@ trait Interface {
     #[method(name = "tunnelInfo")]
     fn tunnel_info(&self, tunnel_socket: String) -> RPCResult<RPCTunnelInfo>;
     #[method(name = "remotes")]
-    fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteInfo>>;
+    fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteStats>>;
     #[method(name = "openTunnel")]
     async fn open_tunnel(
         &self,
@@ -62,7 +65,7 @@ trait Interface {
     #[method(name = "addRemote")]
     fn add_remote(&self, tunnel: String, remote: String) -> RPCResult<()>;
     #[method(name = "removeRemote")]
-    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteInfo>;
+    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteStats>;
 }
 
 pub struct ControlRpc {
@@ -80,7 +83,7 @@ impl InterfaceServer for ControlRpc {
         self.state.info_to(&addr)
     }
 
-    fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteInfo>> {
+    fn remotes(&self, tunnel_socket: String) -> RPCResult<HashMap<String, RemoteStats>> {
         let addr: SocketSpec = tunnel_socket.parse()?;
         self.state
             .remotes(&addr)
@@ -128,10 +131,12 @@ impl InterfaceServer for ControlRpc {
         let remote = remote.parse()?;
         self.state.add_remote_to_tunnel(&local, remote)
     }
-    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteInfo> {
+    fn remove_remote(&self, tunnel: String, remote: String) -> RPCResult<RemoteStats> {
         let local = tunnel.parse()?;
         let remote = remote.parse()?;
-        self.state.remove_remote_from_tunnel(&local, &remote)
+        self.state
+            .remove_remote_from_tunnel(&local, &remote)
+            .map(|ri| ri.stats)
     }
 }
 

@@ -96,7 +96,7 @@ impl LBStrategy for MinimumOpenConnections {
         for (idx, open_conns) in tunnel
             .remotes
             .iter()
-            .map(|(_, r)| r.streams_open + r.streams_pending)
+            .map(|(_, r)| r.stats.streams_open + r.stats.streams_pending)
             .enumerate()
         {
             if open_conns == 0 {

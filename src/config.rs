@@ -63,6 +63,12 @@ pub struct Args {
 
     #[arg(long, help = "alternative CA roots as PEM file")]
     pub ca_bundle: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "prometheus exporter socket address - metrics will be available in text format on http://host:port/metrics"
+    )]
+    pub prometheus_socket: Option<SocketAddr>,
 }
 
 impl Default for Args {
@@ -78,6 +84,7 @@ impl Default for Args {
             remote_dead_check_interval: 10.0,
             help_tunnel: false,
             ca_bundle: None,
+            prometheus_socket: None,
         }
     }
 }

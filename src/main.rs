@@ -1,5 +1,7 @@
 use clap::Parser;
 use futures::TryFutureExt;
+#[cfg(feature = "metrics")]
+use plexy::metrics::{init_meter, init_prometheus};
 use plexy::{
     config::Args,
     controller::run_controller,
@@ -12,8 +14,11 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> plexy::error::Result<()> {
-    //console_subscriber::init();
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+    #[cfg(not(feature = "tokio-console"))]
     tracing_subscriber::fmt::init();
+
     let mut args = Args::parse();
     if args.help_tunnel {
         Args::tunnel_help();
@@ -40,8 +45,32 @@ async fn main() -> plexy::error::Result<()> {
     };
     let control_socket = args.control_socket;
     let rpc_socket = args.rpc_socket;
+    #[cfg(feature = "metrics")]
+    let prometheus_socket = args.prometheus_socket;
+
+    #[cfg(feature = "metrics")]
+    let (state, registry) = {
+        let (_, registry) = init_prometheus();
+        let state = State::new(args, init_meter())?;
+        (state, registry)
+    };
+    #[cfg(not(feature = "metrics"))]
     let state = State::new(args)?;
+
     info!(tunnels = ?tunnels, "Started plexy");
+
+    #[cfg(feature = "metrics")]
+    {
+        if let Some(prometheus_socket) = prometheus_socket {
+            info!(
+                "Prometheus interface is running on http://{}/metrics",
+                prometheus_socket
+            );
+
+            tokio::spawn(plexy::metrics::run(prometheus_socket, registry));
+        }
+    }
+
     if let Some(control_socket) = control_socket {
         info!("Control interface listening on {}", control_socket);
         tokio::spawn(
