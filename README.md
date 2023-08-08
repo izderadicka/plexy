@@ -23,6 +23,8 @@ list of remote socket addresses and and possibly some options in square brackets
 Once started you can interact with plexy either by simple line protocol (listening on port defined by `--control-socket` argument and/or by [JSONRPC](https://www.jsonrpc.org/specification) protocol on port defined on `rpc-socket` argument.
 Via control protocol/API you can add remote ends to tunnels, create new tunnels, close tunnels, get tunnel info etc.
 
+Metrics from plexy can be sent to Prometheus (if `--prometheus-socket` argument is passed).
+
 ### Example of interaction with plexy via simple command line protocol:
 
 ```
